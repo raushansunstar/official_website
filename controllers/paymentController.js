@@ -12,7 +12,7 @@ export const createOrder = async (req, res) => {
     const razorpay = razorpayFactory(hotelCode);
 
     const options = {
-      amount: amount * 100,  // Razorpay requires amount in paise
+      amount: Math.round(amount * 100),  // Razorpay requires amount in paise and must be an integer
       currency,
       receipt: receipt || `rcpt_${Date.now()}`,
     };
@@ -21,7 +21,12 @@ export const createOrder = async (req, res) => {
     res.json(order);
   } catch (err) {
     console.error("Error creating Razorpay order:", err);
-    res.status(500).json({ error: err.message });
+
+    if (err.message && err.message.includes("Invalid Razorpay keys")) {
+      return res.status(400).json({ message: err.message });
+    }
+
+    res.status(500).json({ message: "Internal Server Error", error: err.message });
   }
 };
 
