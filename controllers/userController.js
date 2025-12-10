@@ -177,14 +177,14 @@ export const sendOtp2 = async (req, res) => {
 
     // ✅ Beautiful HTML Email
     const mailOptions = {
-      from: 'Sunstar Hospitality <webmaster@sunstarhospitality.com>',
+      from: 'Sunstar Group <webmaster@sunstarhospitality.com>',
       to: email,
-      subject: 'Your One-Time Password (OTP) - Sunstar Hospitality',
+      subject: 'Your One-Time Password (OTP) - Sunstar Group',
       html: `
         <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: auto; border: 1px solid #e0e0e0; border-radius: 12px; overflow: hidden; background-color: #ffffff;">
           <!-- Header -->
           <div style="background-color: #f5a623; padding: 30px 20px; text-align: center;">
-            <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 600; letter-spacing: 1px;">Sunstar Hospitality</h1>
+            <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 600; letter-spacing: 1px;">Sunstar Group</h1>
           </div>
           
           <!-- Content -->
@@ -205,7 +205,7 @@ export const sendOtp2 = async (req, res) => {
             <!-- Warning Box -->
             <div style="background-color: #fff3cd; border-left: 5px solid #ffc107; padding: 15px; margin-bottom: 30px; border-radius: 4px;">
               <p style="margin: 0; color: #856404; font-size: 14px;">
-                <strong>SECURITY WARNING:</strong> Do not share this OTP with anyone, including Sunstar Hospitality staff. We will never ask for your OTP over phone or email.
+                <strong>SECURITY WARNING:</strong> Do not share this OTP with anyone, including Sunstar Group staff. We will never ask for your OTP over phone or email.
               </p>
             </div>
 
@@ -225,7 +225,7 @@ export const sendOtp2 = async (req, res) => {
           <!-- Footer -->
           <div style="background-color: #f9f9f9; padding: 20px; text-align: center; border-top: 1px solid #e0e0e0;">
             <p style="margin: 0 0 10px; font-size: 12px; color: #888888;">
-              &copy; ${new Date().getFullYear()} Sunstar Hospitality. All rights reserved.
+              &copy; ${new Date().getFullYear()} Sunstar Group. All rights reserved.
             </p>
             <p style="margin: 0; font-size: 12px; color: #888888;">
               Need help? Contact us at <a href="mailto:webmaster@sunstarhospitality.com" style="color: #f5a623; text-decoration: none;">webmaster@sunstarhospitality.com</a>
@@ -384,7 +384,7 @@ export const applyForJob = async (req, res) => {
     `;
 
     const adminMail = {
-      from: `Sunstar Hospitality <${process.env.EMAIL_USER}>`,
+      from: `Sunstar Group <${process.env.EMAIL_USER}>`,
       to: process.env.EMAIL_USER, // .env me set karein
       subject: `New Application: ${name} - ${appliedFor}`,
       html: adminHtml,
@@ -404,7 +404,7 @@ export const applyForJob = async (req, res) => {
       <p>Best Regards,<br/>Team Sunstar</p>
     `;
     const userMail = {
-      from: `Sunstar Hospitality <${process.env.EMAIL_USER}>`,
+      from: `Sunstar Group <${process.env.EMAIL_USER}>`,
       to: emailId,
       subject: `Thanks for applying — ${appliedFor}`,
       html: userHtml

@@ -18,13 +18,13 @@ const prettyRole = (r) => (r === 'corporate' ? 'Corporate' : 'Agent');
 
 const sendOtpEmail = async ({ to, name, otp, roleTitle }) => {
   await transporter.sendMail({
-    from: process.env.MAIL_FROM || 'Sunstar Hospitality <webmaster@sunstarhospitality.com>',
+    from: process.env.MAIL_FROM || 'Sunstar Group <webmaster@sunstarhospitality.com>',
     to,
     subject: 'Your One-Time Password (OTP)',
     html: `
       <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;border:1px solid #eee;border-radius:8px;">
         <div style="background:#f5a623;padding:16px;text-align:center;color:#fff;">
-          <h2 style="margin:0;">Sunstar Hospitality</h2>
+          <h2 style="margin:0;">Sunstar Group</h2>
         </div>
         <div style="padding:24px;">
           <p>Hi ${name || 'User'},</p>
@@ -46,7 +46,7 @@ const sendAdminApprovalRequestEmail = async (agent) => {
   if (!to) return;
   const roleTitle = agent.role === "corporate" ? "Corporate Partner" : "Travel Agent";
   await transporter.sendMail({
-    from: process.env.MAIL_FROM || 'Sunstar Hospitality <webmaster@sunstarhospitality.com>',
+    from: process.env.MAIL_FROM || 'Sunstar Group <webmaster@sunstarhospitality.com>',
     to,
     subject: `Approval needed: ${roleTitle} signup (${agent.email})`,
     html: `
@@ -67,7 +67,7 @@ const sendAdminApprovalRequestEmail = async (agent) => {
 const sendUserApprovedEmail = async (agent) => {
   const roleTitle = agent.role === "corporate" ? "Corporate Partner" : "Travel Agent";
   await transporter.sendMail({
-    from: process.env.MAIL_FROM || 'Sunstar Hospitality <webmaster@sunstarhospitality.com>',
+    from: process.env.MAIL_FROM || 'Sunstar Group <webmaster@sunstarhospitality.com>',
     to: agent.email,
     subject: `You're approved — Welcome ${roleTitle}!`,
     html: `
@@ -88,8 +88,8 @@ export const loginAgent = async (req, res) => {
   const roleTitle = role === "corporate" ? "Corporate Partner" : "Travel Agent";
 
   try {
-    const byPhone   = phone ? await Agent.findOne({ phone }) : null;
-    const existing  = await Agent.findOne({ email: lowerEmail });
+    const byPhone = phone ? await Agent.findOne({ phone }) : null;
+    const existing = await Agent.findOne({ email: lowerEmail });
 
     // phone conflict
     if (byPhone && (!existing || String(byPhone._id) !== String(existing._id))) {
@@ -97,7 +97,7 @@ export const loginAgent = async (req, res) => {
         return res.status(409).json({
           ok: false,
           message: `This phone is already registered as ${prettyRole(byPhone.role)}. `
-                 + `If you want to switch to ${prettyRole(role)}, please contact admin to delete your current ID.`,
+            + `If you want to switch to ${prettyRole(role)}, please contact admin to delete your current ID.`,
         });
       }
       return res.status(409).json({ ok: false, message: "Phone already in use." });
@@ -108,7 +108,7 @@ export const loginAgent = async (req, res) => {
       return res.status(409).json({
         ok: false,
         message: `You are already registered as ${prettyRole(existing.role)}. `
-               + `If you want to be ${prettyRole(role)}, please contact admin to delete your current ID.`,
+          + `If you want to be ${prettyRole(role)}, please contact admin to delete your current ID.`,
       });
     }
 
@@ -205,7 +205,7 @@ export const verifyAgentOtp = async (req, res) => {
     const roleTitle = agent.role === "corporate" ? "Corporate Partner" : "Travel Agent";
     try {
       await transporter.sendMail({
-        from: process.env.MAIL_FROM || 'Sunstar Hospitality <webmaster@sunstarhospitality.com>',
+        from: process.env.MAIL_FROM || 'Sunstar Group <webmaster@sunstarhospitality.com>',
         to: agent.email,
         subject: `Successfully logged in — Welcome ${roleTitle}!`,
         html: `
