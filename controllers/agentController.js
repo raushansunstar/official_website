@@ -2,6 +2,7 @@
 import { validationResult } from "express-validator";
 import nodemailer from "nodemailer";
 import { Agent } from "../models/Agent.js";
+import { syncUserToSheet } from '../utils/sheetSync.js';
 
 export const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -148,6 +149,9 @@ export const loginAgent = async (req, res) => {
     try { await sendOtpEmail({ to: lowerEmail, name, otp: agent.otp, roleTitle }); }
     catch (mailErr) { console.warn("OTP email send failed:", mailErr.message); }
 
+    // Sync to Google Sheet
+    syncUserToSheet(agent).catch(err => console.error('Sheet sync error (agent login):', err));
+
     // More explicit message about approval
     return res.status(202).json({
       ok: true,
@@ -218,6 +222,9 @@ export const verifyAgentOtp = async (req, res) => {
     } catch (mailErr) {
       console.warn("Welcome email send failed:", mailErr.message);
     }
+
+    // Sync to Google Sheet (verified status)
+    syncUserToSheet(agent).catch(err => console.error('Sheet sync error (agent verify):', err));
 
     return res.status(200).json({
       ok: true,

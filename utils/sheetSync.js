@@ -46,6 +46,21 @@ async function getSheetNameByGid(gid) {
  * Appends a user to the Google Sheet
  * @param {Object} user - The user object
  */
+// Helper to get letter from index (0 -> A, 1 -> B, etc.)
+const getColumnLetter = (colIndex) => {
+    let temp, letter = '';
+    while (colIndex >= 0) {
+        temp = (colIndex % 26);
+        letter = String.fromCharCode(temp + 65) + letter;
+        colIndex = (colIndex - temp - 1) / 26;
+    }
+    return letter;
+};
+
+/**
+ * Appends or Updates a user in the Google Sheet
+ * @param {Object} user - The user object
+ */
 export const syncUserToSheet = async (user) => {
     try {
         if (!SPREADSHEET_ID) {
@@ -59,30 +74,74 @@ export const syncUserToSheet = async (user) => {
             return;
         }
 
-        const { email, firstName, lastName, phone, role, updatedAt } = user;
-        const fullName = `${firstName || ''} ${lastName || ''}`.trim();
-        const updatedStr = updatedAt ? new Date(updatedAt).toISOString() : new Date().toISOString();
-
-        const values = [[
-            email,
-            fullName,
-            phone || '',
-            role || 'user',
-            updatedStr
-        ]];
-
-        const range = `'${sheetName}'!A:E`; // Appends to cols A-E
-
-        await sheets.spreadsheets.values.append({
+        // 1. Fetch all existing data to check for duplicates (Column A = Email usually)
+        const readResponse = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: range,
-            valueInputOption: 'USER_ENTERED',
-            resource: {
-                values,
-            },
+            range: `'${sheetName}'!A:E`, // Assuming A=Email
         });
 
-        console.log(`Successfully synced user ${email} to sheet: ${sheetName}`);
+        const rows = readResponse.data.values || [];
+        const { email, firstName, lastName, phone, role, updatedAt, name } = user;
+        // Handle both user (firstName/lastName) and agent (name) models
+        const fullName = name ? name : `${firstName || ''} ${lastName || ''}`.trim();
+
+        // Proper Date Formatting (DD/MM/YYYY, h:mm:ss a)
+        const dateObj = updatedAt ? new Date(updatedAt) : new Date();
+        const updatedStr = dateObj.toLocaleString('en-IN', {
+            timeZone: 'Asia/Kolkata',
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: true
+        });
+
+        const userEmail = email ? String(email).toLowerCase().trim() : '';
+        const userRole = role ? String(role).toLowerCase().trim() : 'user';
+
+        if (!userEmail) return;
+
+        // Check if Email AND Role combination exists
+        // row[0] is Email, row[3] is Role (based on append order below)
+        const rowIndex = rows.findIndex(row => {
+            const rowEmail = row[0] ? String(row[0]).toLowerCase().trim() : '';
+            const rowRole = row[3] ? String(row[3]).toLowerCase().trim() : 'user';
+            return rowEmail === userEmail && rowRole === userRole;
+        });
+
+        const newRow = [
+            userEmail,
+            fullName,
+            phone || '',
+            userRole,
+            updatedStr
+        ];
+
+        if (rowIndex !== -1) {
+            // ✅ UPDATE existing row (same Email + same Role)
+            const sheetRowNumber = rowIndex + 1;
+
+            await sheets.spreadsheets.values.update({
+                spreadsheetId: SPREADSHEET_ID,
+                range: `'${sheetName}'!A${sheetRowNumber}:E${sheetRowNumber}`,
+                valueInputOption: 'USER_ENTERED',
+                resource: { values: [newRow] }
+            });
+
+            console.log(`Successfully UPDATED ${userRole} ${userEmail} at row ${sheetRowNumber} in sheet: ${sheetName}`);
+        } else {
+            // ✅ APPEND new row (New Email OR Same Email but Diff Role)
+            await sheets.spreadsheets.values.append({
+                spreadsheetId: SPREADSHEET_ID,
+                range: `'${sheetName}'!A:E`,
+                valueInputOption: 'USER_ENTERED',
+                resource: { values: [newRow] },
+            });
+
+            console.log(`Successfully APPENDED ${userRole} ${userEmail} to sheet: ${sheetName}`);
+        }
     } catch (error) {
         console.error('Error syncing user to sheet:', error);
     }
