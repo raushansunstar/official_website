@@ -1,0 +1,1 @@
+import{j as o}from"./index-0QpvJiBb.js";import{c as s}from"./createSvgIcon-C0x0Onrz.js";const h=s(o.jsx("path",{d:"M19 13H5v-2h14z"})),m=s(o.jsx("path",{d:"M1 21h22L12 2zm12-3h-2v-2h2zm0-4h-2v-4h2z"}));export{h as R,m as W};
