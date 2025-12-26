@@ -37,8 +37,10 @@ import travelAgentRoutes from './routes/travelAgentRoutes.js';
 import eventPageRoutes from './routes/eventPageRoutes.js';
 import loyaltyProgramRoutes from './routes/loyaltyProgramRoutes.js';
 import tourandtravelcontentroutes from './routes/tourandtravelcontentroutes.js';
+import digitalAssetRoutes from './routes/digitalAssetRoutes.js';
+import diningRoutes from './routes/diningRoutes.js';
 
-import { pushBooking,getBookingList } from './controllers/pushBookingController.js';
+import { pushBooking, getBookingList } from './controllers/pushBookingController.js';
 
 dotenv.config();
 
@@ -202,10 +204,11 @@ app.use('/api/travel-agent', travelAgentRoutes);
 app.use('/api/event-pages', eventPageRoutes);
 app.use('/api/loyalty', loyaltyProgramRoutes);
 app.use('/api/tourandtravel', tourandtravelcontentroutes);
+app.use('/api/digital-assets', digitalAssetRoutes);
+app.use('/api/dining', diningRoutes);
 
 
-
-app.use('/media', express.static(path.join(__dirname, 'client', 'public', 'media')));
+app.use('/media', express.static(path.join(__dirname, 'build', 'public', 'media')));
 
 // ✅ API mount
 // app.use('/api/media', mediaRoutes);

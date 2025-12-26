@@ -16,9 +16,18 @@ router.post('/upload', async (req, res) => {
     const file = req.files.file;
 
     // validate type
-    const allowedTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/svg+xml'];
+    const allowedTypes = [
+      'image/png',
+      'image/jpeg',
+      'image/webp',
+      'image/gif',
+      'image/svg+xml',
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    ];
     if (!allowedTypes.includes(file.mimetype)) {
-      return res.status(400).json({ success: false, msg: 'Only image files are allowed' });
+      return res.status(400).json({ success: false, msg: 'Only image, PDF, and document files are allowed' });
     }
 
     // generate filename

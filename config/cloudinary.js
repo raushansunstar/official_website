@@ -29,11 +29,14 @@ const uploadMultiple = multer({
       file.mimetype === 'image/png' ||
       file.mimetype === 'image/svg+xml' ||
 
-      file.mimetype === 'image/webp'
+      file.mimetype === 'image/webp' ||
+      file.mimetype === 'application/pdf' ||
+      file.mimetype === 'application/msword' ||
+      file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     ) {
       cb(null, true);
     } else {
-      cb(new Error('Only JPEG, PNG,,jpg and WEBP files are allowed'), false);
+      cb(new Error('Only JPEG, PNG, WEBP, PDF and Docs are allowed'), false);
     }
   },
   limits: {
@@ -114,17 +117,17 @@ export const uploadImages = asyncHandler(async (req, res) => {
     try {
       // Handle file uploads from either the 'images' or 'image' field
       const files = [];
-      
+
       // Add files from 'images' field if it exists
       if (req.files && req.files.images) {
         files.push(...req.files.images);
       }
-      
+
       // Add files from 'image' field if it exists
       if (req.files && req.files.image) {
         files.push(...req.files.image);
       }
-      
+
       // Handle single file uploaded with wrong field name
       if (req.file) {
         files.push(req.file);
@@ -139,20 +142,32 @@ export const uploadImages = asyncHandler(async (req, res) => {
       // Process images in smaller batches
       const batchSize = 3;
       const imageUrls = [];
-      
+
       for (let i = 0; i < files.length; i += batchSize) {
         const batch = files.slice(i, i + batchSize);
-        
+
         const batchPromises = batch.map(async (file) => {
-          const optimizedBuffer = await optimizeImage(file.buffer);
-          
+          const isImage = file.mimetype.startsWith('image/');
+          let uploadBuffer = file.buffer;
+
+          // Only optimize if it's an image
+          if (isImage) {
+            try {
+              uploadBuffer = await optimizeImage(file.buffer, file.mimetype);
+            } catch (optErr) {
+              console.warn("Image optimization failed, using original buffer", optErr);
+            }
+          }
+
           return new Promise((resolve, reject) => {
             const uploadStream = cloudinary.v2.uploader.upload_stream(
-              { 
+              {
                 folder: 'hotel_images',
-                resource_type: 'image',
-                format: 'jpg',
-                quality: 'auto:low',
+                resource_type: isImage ? 'image' : 'raw', // Explicitly use 'raw' for docs to prevent "image" processing errors
+                use_filename: true, // Try to preserve filename
+                public_id: isImage ? undefined : file.originalname.split('.')[0], // For raw, using filename is standard
+                // format: isImage ? 'jpg' : undefined, // REMOVED: Do not force JPG, allow PNG/WebP for transparency
+                quality: isImage ? 'auto' : undefined, // changed auto:low to auto for better quality with transparency
               },
               (error, result) => {
                 if (error) {
@@ -163,10 +178,10 @@ export const uploadImages = asyncHandler(async (req, res) => {
                 }
               }
             );
-            uploadStream.end(optimizedBuffer);
+            uploadStream.end(uploadBuffer);
           });
         });
-        
+
         const batchUrls = await Promise.all(batchPromises);
         imageUrls.push(...batchUrls);
       }

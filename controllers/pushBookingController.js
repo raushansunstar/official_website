@@ -129,9 +129,34 @@ export const getBookingList = async (req, res) => {
       };
     });
 
+    // --- Persist Total Earnings Logic ---
+    if (user) {
+      const commissionRate = user.commissionRate || 0.10;
+
+      // Filter for "Agnet" or "Corporate" (assuming we track all earnings, or just filter non-cancelled)
+      // Note: The frontend explicitly filters for "Agent" source for AgentDashboard. 
+      // Here we will calculate earnings for ALL valid bookings associated with this user that are NOT cancelled.
+
+      const validBookings = mergedBookingList.filter(b => {
+        const status = (b.Booking_Status || b.Status || "").toLowerCase();
+        return status !== "cancelled" && status !== "failed";
+      });
+
+      const totalEarnings = validBookings.reduce((sum, booking) => {
+        const amount = parseFloat(booking.TotalInclusiveTax || 0);
+        return sum + (amount * commissionRate);
+      }, 0);
+
+      // Update DB
+      user.totalEarnings = totalEarnings;
+      await user.save();
+    }
+    // ------------------------------------
+
     res.json({
       ...response.data,
-      BookingList: mergedBookingList
+      BookingList: mergedBookingList,
+      totalEarnings: user ? user.totalEarnings : 0
     });
 
   } catch (err) {

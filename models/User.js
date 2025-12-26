@@ -41,7 +41,8 @@ const userSchema = new mongoose.Schema({
   otp: { type: String },
   otpExpires: { type: Date },
   commissionRate: { type: Number, default: 0.10 }, // Default 10% commission
-  bookingDetails: [bookingDetailsSchema]
+  bookingDetails: [bookingDetailsSchema],
+  totalEarnings: { type: Number, default: 0 }
 }, { timestamps: true });
 
 export const getModel = (modelName, schema) => {
