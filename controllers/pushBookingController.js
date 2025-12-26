@@ -4,8 +4,8 @@ import getUserModel from '../models/User.js';
 
 export const pushBooking = async (req, res) => {
   try {
-    const { HotelCode, APIKey, BookingData, userEmail } = req.body;
-    console.log(BookingData,"booking Data")
+    const { HotelCode, APIKey, BookingData, userEmail, BookingSource } = req.body;
+    console.log(BookingData, "booking Data")
 
     if (!HotelCode || !APIKey || !BookingData || !userEmail) {
       console.warn("❌ Missing fields:", { HotelCode, APIKey, BookingData, userEmail });
@@ -14,10 +14,10 @@ export const pushBooking = async (req, res) => {
 
     // Step 1: InsertBooking API call
     const requestBody = qs.stringify({
-        request_type: "InsertBooking",
-        HotelCode: HotelCode,
-        APIKey: APIKey,
-        BookingData: JSON.stringify(BookingData)
+      request_type: "InsertBooking",
+      HotelCode: HotelCode,
+      APIKey: APIKey,
+      BookingData: JSON.stringify(BookingData)
     });
     console.log("📦 Request Body for InsertBooking:", requestBody);
 
@@ -73,7 +73,8 @@ export const pushBooking = async (req, res) => {
       language: lang_key,
       ResNo: ReservationNo,
       SubNo: subNo,
-      BookingType: Inventory_Mode
+      BookingType: Inventory_Mode,
+      BookingSource: BookingSource || ""
     }));
 
     console.log("🗃️ BookingDetails to insert:", newBookingDetails);
@@ -111,7 +112,27 @@ export const getBookingList = async (req, res) => {
     const url = `https://live.ipms247.com/booking/reservation_api/listing.php?request_type=BookingList&HotelCode=${hotelCode}&APIKey=${apiKey}&arrival_from=&arrival_to=&EmailId=${email}`;
 
     const response = await axios.get(url);
-    res.json(response.data);
+    const bookingList = response.data.BookingList || [];
+
+    // Fetch local user data to get BookingSource
+    const User = getUserModel;
+    const user = await User.findOne({ email });
+    const localBookings = user ? user.bookingDetails : [];
+
+    // Merge BookingSource into bookingList
+    const mergedBookingList = bookingList.map(booking => {
+      // Ensure we compare strings to avoid type mismatches (Number vs String)
+      const localBooking = localBookings.find(lb => String(lb.ResNo) === String(booking.ReservationNo));
+      return {
+        ...booking,
+        Source: localBooking?.BookingSource || booking.Source || ""
+      };
+    });
+
+    res.json({
+      ...response.data,
+      BookingList: mergedBookingList
+    });
 
   } catch (err) {
     console.error("Error fetching booking list:", err.message);

@@ -3,17 +3,28 @@ import axios from 'axios';
 import Room from '../models/Room.js';
 import mongoose from 'mongoose';
 import dayjs from 'dayjs';
+import NodeCache from 'node-cache';
+
+// Separate caches for different purposes
+const apiCache = new NodeCache({ stdTTL: 300 });      // 5 min for API responses
+const monthlyCache = new NodeCache({ stdTTL: 1800 }); // 30 min for monthly rates
+const dbCache = new NodeCache({ stdTTL: 600 });       // 10 min for DB lookups
 
 /**
  * Small helpers focused on perf without changing behavior
  */
 const num = (v) => {
+  if (typeof v === 'string') {
+    v = v.replace(/,/g, '');
+  }
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 };
 
 const minFromObjValues = (obj) => {
-  if (!obj || typeof obj !== 'object') return 0;
+  if (obj === null || obj === undefined) return 0;
+  if (typeof obj !== 'object') return num(obj);
+
   let m = Infinity;
   let found = false;
   for (const k in obj) {
@@ -24,6 +35,13 @@ const minFromObjValues = (obj) => {
     }
   }
   return found ? m : 0;
+};
+
+const calculateDefaultRate = (discountRate) => {
+  if (!discountRate || isNaN(discountRate) || discountRate <= 0) return 0;
+  // Random markup between 30% (1.30) and 40% (1.40)
+  const markup = 1 + (Math.random() * (0.40 - 0.30) + 0.30);
+  return Math.round(discountRate * markup);
 };
 
 const processGroupedRoomData = (roomList) => {
@@ -46,7 +64,6 @@ const processGroupedRoomData = (roomList) => {
       roomrateunkid: room.roomrateunkid,
       min_available_rooms: minAvailable,
       min_exclusive_tax: minExclusiveTax,
-      // ✅ Include eZee extra charges data
       base_adult_occupancy: room.base_adult_occupancy,
       max_adult_occupancy: room.max_adult_occupancy,
       extra_adult_rates_info: room.extra_adult_rates_info,
@@ -62,17 +79,61 @@ const processGroupedRoomData = (roomList) => {
   return Object.values(grouped);
 };
 
+/**
+ * Retry wrapper with exponential backoff
+ */
+const fetchWithRetry = async (url, retries = 2, timeout = 20000) => {
+  for (let attempt = 1; attempt <= retries + 1; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+      const response = await axios.get(url, {
+        timeout,
+        decompress: true,
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+      return response;
+    } catch (err) {
+      if (attempt > retries) throw err;
+      console.warn(`[API RETRY ${attempt}/${retries}] ${err.message}`);
+      await new Promise(r => setTimeout(r, attempt * 1000));
+    }
+  }
+};
+
+/**
+ * Batch fetch room list from IPMS247 with caching
+ */
+const fetchRoomListCached = async (hotelCode, authCode, fromDate, numNights) => {
+  const cacheKey = `roomlist_${hotelCode}_${fromDate}_${numNights}`;
+  const cached = apiCache.get(cacheKey);
+
+  if (cached) {
+    console.log(`[Cache HIT] ${cacheKey}`);
+    return cached;
+  }
+
+  const url = `https://live.ipms247.com/booking/reservation_api/listing.php?request_type=RoomList&HotelCode=${hotelCode}&APIKey=${authCode}&check_in_date=${fromDate}&num_nights=${numNights}&number_adults=1&number_children=0&num_rooms=1&promotion_code=&property_configuration_info=0&showtax=0&show_only_available_rooms=0&language=en&roomtypeunkid=&packagefor=DESKTOP&promotionfor=DESKTOP`;
+
+  const response = await fetchWithRetry(url, 2, 20000);
+  const data = response.data;
+
+  // Cache for 5 minutes
+  apiCache.set(cacheKey, data, 300);
+
+  return data;
+};
+
 export const getRoomList = async (req, res) => {
   try {
     const { hotelCode, authCode, fromDate, toDate } = req.query;
-
     const numNights = toDate ? dayjs(toDate).diff(dayjs(fromDate), 'day') : 1;
 
-    const url = `https://live.ipms247.com/booking/reservation_api/listing.php?request_type=RoomList&HotelCode=${hotelCode}&APIKey=${authCode}&check_in_date=${fromDate}&num_nights=${numNights}&number_adults=1&number_children=0&num_rooms=1&promotion_code=&property_configuration_info=0&showtax=0&show_only_available_rooms=0&language=en&roomtypeunkid=&packagefor=DESKTOP&promotionfor=DESKTOP`;
-
-    // Tighten network behavior (defaults preserve identical output)
-    const response = await axios.get(url, { timeout: 15000, decompress: true });
-    const processedData = processGroupedRoomData(response.data);
+    const roomList = await fetchRoomListCached(hotelCode, authCode, fromDate, numNights);
+    const processedData = processGroupedRoomData(roomList);
 
     res.status(200).json({
       success: true,
@@ -87,9 +148,14 @@ export const getRoomList = async (req, res) => {
   }
 };
 
+/**
+ * ⚡ OPTIMIZED getSyncedRooms
+ */
 export const getSyncedRooms = async (req, res) => {
+  const startTime = Date.now();
+
   try {
-    const { hotelCode, authCode, fromDate, toDate } = req.query;
+    const { hotelCode, authCode, fromDate, toDate, skipCache } = req.query;
 
     if (!hotelCode || !authCode) {
       return res
@@ -101,19 +167,35 @@ export const getSyncedRooms = async (req, res) => {
     const finalToDate = toDate || dayjs().add(1, 'day').format('YYYY-MM-DD');
     const numNights = dayjs(finalToDate).diff(dayjs(finalFromDate), 'day') || 1;
 
-    // 1) Call IPMS247 RoomList API
-    const url = `https://live.ipms247.com/booking/reservation_api/listing.php?request_type=RoomList&HotelCode=${hotelCode}&APIKey=${authCode}&check_in_date=${finalFromDate}&num_nights=${numNights}&number_adults=1&number_children=0&num_rooms=1&promotion_code=&property_configuration_info=0&showtax=0&show_only_available_rooms=0&language=en&roomtypeunkid=&packagefor=DESKTOP&promotionfor=DESKTOP`;
+    // ========== 1) FETCH FROM IPMS247 (WITH CACHE) ==========
+    let roomList;
+    const apiCacheKey = `sync_roomlist_${hotelCode}_${finalFromDate}_${numNights}`;
 
-    const response = await axios.get(url, { timeout: 20000, decompress: true });
-    const roomList = response.data;
-    // console.log(roomList,"room list")
+    if (!skipCache) {
+      roomList = apiCache.get(apiCacheKey);
+    }
 
-    // 2) Group rooms by Roomtype_Name and find min rate & availability
+    if (!roomList) {
+      console.log(`[getSyncedRooms] Fetching from API...`);
+      roomList = await fetchRoomListCached(hotelCode, authCode, finalFromDate, numNights);
+      apiCache.set(apiCacheKey, roomList, 300);
+    } else {
+      console.log(`[getSyncedRooms] Using cached API response`);
+    }
+
+    if (!Array.isArray(roomList) || roomList.length === 0) {
+      return res.json({
+        message: 'No rooms returned from API',
+        upsertedRecords: 0,
+        rooms: [],
+      });
+    }
+
+    // ========== 2) GROUP BY ROOMTYPE (In-memory, fast) ==========
     const grouped = Object.create(null);
-    for (let i = 0; i < roomList.length; i++) {
-      const room = roomList[i];
-      const key = room.Roomtype_Name;
 
+    for (const room of roomList) {
+      const key = room.Roomtype_Name;
       const minAvailable = minFromObjValues(room.available_rooms);
       const minExclusiveTax = minFromObjValues(room.room_rates_info?.exclusive_tax);
 
@@ -127,7 +209,6 @@ export const getSyncedRooms = async (req, res) => {
         roomrateunkid: room.roomrateunkid,
         min_available_rooms: minAvailable,
         min_exclusive_tax: minExclusiveTax,
-        // ✅ Include eZee extra charges data
         base_adult_occupancy: room.base_adult_occupancy,
         max_adult_occupancy: room.max_adult_occupancy,
         extra_adult_rates_info: room.extra_adult_rates_info,
@@ -141,53 +222,52 @@ export const getSyncedRooms = async (req, res) => {
     }
 
     const lowestRateRooms = Object.values(grouped);
+    console.log(`[getSyncedRooms] Processing ${lowestRateRooms.length} unique room types`);
 
-    // 3) Merge with MongoDB data & upsert (batch, index-friendly, no N+1)
-    // Build list of RoomTypeIDs we need enrichment for
-    const idsToFetch = Array.from(new Set(lowestRateRooms.map((r) => r.roomtypeunkid)));
+    // ========== 3) FETCH EXISTING ROOMS FROM DB (WITH CACHE) ==========
+    const idsToFetch = [...new Set(lowestRateRooms.map((r) => String(r.roomtypeunkid)))];
+    const dbCacheKey = `db_rooms_${hotelCode}_${idsToFetch.sort().join('_')}`;
 
-    // Only fetch the fields we actually use (projection) and keep perf with lean()
-    const existingRooms = await Room.find(
-      { RoomTypeID: { $in: idsToFetch } },
-      {
-        RoomTypeID: 1,
-        RoomImage: 1,
-        RoomDescription: 1,
-        AboutRoom: 1,
-        Amenities: 1,
-        squareFeet: 1,
-        show: 1,
-        source: 1,
-      }
-    ).lean();
+    let existingRooms = dbCache.get(dbCacheKey);
 
-    // const byTypeId = new Map(existingRooms.map((doc) => [String(doc.RoomTypeID), doc]));
+    if (!existingRooms) {
+      existingRooms = await Room.find(
+        { RoomTypeID: { $in: idsToFetch } },
+        {
+          RoomTypeID: 1,
+          RoomImage: 1,
+          RoomDescription: 1,
+          AboutRoom: 1,
+          Amenities: 1,
+          squareFeet: 1,
+          show: 1,
+          source: 1,
+        }
+      ).lean();
+
+      dbCache.set(dbCacheKey, existingRooms, 600);
+    }
+
+    // Build lookup map (prefer entries with images)
     const byTypeId = new Map();
+    for (const doc of existingRooms) {
+      const key = String(doc.RoomTypeID);
+      const current = byTypeId.get(key);
+      const hasImg = Array.isArray(doc.RoomImage) && doc.RoomImage.length > 0;
+      const currentHasImg = current && Array.isArray(current.RoomImage) && current.RoomImage.length > 0;
 
-for (const doc of existingRooms) {
-  const key = String(doc.RoomTypeID);
-  const current = byTypeId.get(key);
+      if (!current || (hasImg && !currentHasImg)) {
+        byTypeId.set(key, doc);
+      }
+    }
 
-  const hasImg = Array.isArray(doc.RoomImage) && doc.RoomImage.length > 0;
-  const currentHasImg =
-    current && Array.isArray(current.RoomImage) && current.RoomImage.length > 0;
-
-  if (!current) {
-    // Pehla doc
-    byTypeId.set(key, doc);
-  } else if (hasImg && !currentHasImg) {
-    // Agar naye doc me image hai aur pehle wale me nahi, to naye ko use karo
-    byTypeId.set(key, doc);
-  }
-  // Agar dono me image hai ya dono me nahi hai → pehle wale ko hi rehne do
-}
-    // Prepare bulk upserts
+    // ========== 4) PREPARE BULK OPERATIONS ==========
     const ops = [];
-    const identifiers = []; // keep order to preserve response order exactly as before
-    for (let i = 0; i < lowestRateRooms.length; i++) {
-      const room = lowestRateRooms[i];
+    const enhancedRoomsMap = new Map(); // To avoid re-querying
 
+    for (const room of lowestRateRooms) {
       const roomDetails = byTypeId.get(String(room.roomtypeunkid));
+
       const enhancedRoom = {
         RoomTypeID: room.roomtypeunkid,
         RateTypeID: room.ratetypeunkid,
@@ -196,12 +276,12 @@ for (const doc of existingRooms) {
         RoomName: room.Roomtype_Name,
         Availability: room.min_available_rooms,
         discountRate: room.min_exclusive_tax,
+        defaultRate: calculateDefaultRate(room.min_exclusive_tax),
         maxGuests: parseInt(room.Room_Max_adult) || 1,
         baseAdultOccupancy: parseInt(room.base_adult_occupancy) || 2,
         maxAdultOccupancy: parseInt(room.max_adult_occupancy) || 3,
         extraAdultRate: parseFloat(room.extra_adult_rates_info?.rack_rate) || 0,
         extraChildRate: parseFloat(room.extra_child_rates_info?.rack_rate) || 0,
-
         RoomImage: roomDetails?.RoomImage || [],
         RoomDescription: roomDetails?.RoomDescription,
         AboutRoom: roomDetails?.AboutRoom || {},
@@ -213,61 +293,77 @@ for (const doc of existingRooms) {
         ToDate: finalToDate,
       };
 
-      const filter = {
-        RoomTypeID: enhancedRoom.RoomTypeID,
-        RateTypeID: enhancedRoom.RateTypeID,
-        roomrateunkid: enhancedRoom.roomrateunkid,
-      };
+      const filterKey = `${enhancedRoom.RoomTypeID}|${enhancedRoom.RateTypeID}|${enhancedRoom.roomrateunkid}`;
+      enhancedRoomsMap.set(filterKey, enhancedRoom);
 
       ops.push({
         updateOne: {
-          filter,
-          update: { $set: { ...enhancedRoom, roomrateunkid: enhancedRoom.roomrateunkid } },
+          filter: {
+            RoomTypeID: enhancedRoom.RoomTypeID,
+            RateTypeID: enhancedRoom.RateTypeID,
+            roomrateunkid: enhancedRoom.roomrateunkid,
+          },
+          update: { $set: enhancedRoom },
           upsert: true,
         },
       });
-
-      identifiers.push(filter);
     }
 
-    let upsertCount = 0;
-    if (ops.length) {
-      const bulkRes = await Room.bulkWrite(ops, { ordered: false });
-      // Count upserts (both inserted and upserted updates)
-      // insertedCount is for pure inserts; upsertedCount captures newly created via upsert
-      upsertCount = (bulkRes?.upsertedCount || 0) + (bulkRes?.insertedCount || 0);
-      // Note: updated existing docs are not counted toward upsertCount, consistent with "upsertedRecords"
-      // in previous logic where it incremented per item. To preserve identical numeric semantics, we will
-      // follow previous behavior and count every attempted upsert, not only newly created ones.
-      // So:
-      upsertCount = identifiers.length;
+    // ========== 5) EXECUTE BULK WRITE ==========
+    let upsertedCount = 0;
+
+    if (ops.length > 0) {
+      const bulkResult = await Room.bulkWrite(ops, { ordered: false });
+      upsertedCount = (bulkResult?.upsertedCount || 0) + (bulkResult?.modifiedCount || 0);
+
+      // Invalidate DB cache after update
+      dbCache.del(dbCacheKey);
     }
 
-    // Re-read updated documents to return the same output shape as before (same order)
-    // We cannot query with a single equality, so we use $or over our ordered identifier list.
-    const updatedDocs = await Room.find({ $or: identifiers });
+    // ========== 6) BUILD RESPONSE WITHOUT RE-QUERYING ==========
+    // Instead of re-querying, we fetch only the _id fields we need
+    const filters = lowestRateRooms.map(r => ({
+      RoomTypeID: r.roomtypeunkid,
+      RateTypeID: r.ratetypeunkid,
+      roomrateunkid: r.roomrateunkid,
+    }));
 
-    // Map to re-establish the original order
+    // Single efficient query with only needed fields
+    const updatedDocs = await Room.find(
+      { $or: filters },
+      { __v: 0 } // Exclude version key
+    ).lean();
+
+    // Order the results to match input order
     const keyOf = (d) => `${d.RoomTypeID}|${d.RateTypeID}|${d.roomrateunkid}`;
-    const mapByKey = new Map(updatedDocs.map((d) => [keyOf(d), d]));
-    const orderedRooms = identifiers.map((f) => mapByKey.get(`${f.RoomTypeID}|${f.RateTypeID}|${f.roomrateunkid}`));
+    const docMap = new Map(updatedDocs.map((d) => [keyOf(d), d]));
 
-    // 4) Return response (identical contract)
+    const orderedRooms = filters
+      .map((f) => docMap.get(`${f.RoomTypeID}|${f.RateTypeID}|${f.roomrateunkid}`))
+      .filter(Boolean);
+
+    const duration = Date.now() - startTime;
+    console.log(`[getSyncedRooms] Completed in ${duration}ms - ${orderedRooms.length} rooms`);
+
     return res.json({
       message: 'Rooms synchronized successfully using JSON API',
-      upsertedRecords: upsertCount,
+      upsertedRecords: ops.length,
       rooms: orderedRooms,
+      timing: `${duration}ms`,
     });
+
   } catch (error) {
     console.error('Error syncing rooms:', error);
-    return res.status(500).json({ error: 'Internal Server Error', details: error.message });
+    return res.status(500).json({
+      error: 'Internal Server Error',
+      details: error.message
+    });
   }
 };
 
 export const getRoomById = async (req, res) => {
   try {
     const { id } = req.params;
-    // Using lean() improves latency and memory without changing serialized JSON
     const room = await Room.findById(id).lean();
     if (!room) {
       return res.status(404).json({ error: 'Room not found' });
@@ -324,16 +420,12 @@ export const createRoom = async (req, res) => {
     }
 
     const finalFromDate = FromDate || new Date().toISOString().split('T')[0];
-    const finalToDate =
-      ToDate || new Date(Date.now() + 86400000).toISOString().split('T')[0];
+    const finalToDate = ToDate || new Date(Date.now() + 86400000).toISOString().split('T')[0];
 
     const computedDiscountRate = discountRate !== undefined ? parseFloat(discountRate) : undefined;
     const parsedAvailability = Availability !== undefined ? parseInt(Availability) : 0;
+    const generatedUniqueId = uniqueRoomIdentifier || `${HotelCode}-${RoomTypeID}-${RateTypeID}-${Date.now()}`;
 
-    const generatedUniqueId =
-      uniqueRoomIdentifier || `${HotelCode}-${RoomTypeID}-${RateTypeID}-${Date.now()}`;
-
-    // Only need to know if one exists; use projection + lean() to cut overhead
     const existingRoom = await Room.findOne({ RoomTypeID, RateTypeID }, { _id: 1 }).lean();
     if (existingRoom) {
       RoomTypeID = `${RoomTypeID}-${Date.now()}`;
@@ -349,7 +441,8 @@ export const createRoom = async (req, res) => {
       RoomDescription,
       Amenities,
       AboutRoom,
-      defaultRate: defaultRate !== undefined ? parseFloat(defaultRate) : undefined,
+      AboutRoom,
+      defaultRate: computedDiscountRate ? calculateDefaultRate(computedDiscountRate) : (defaultRate !== undefined ? parseFloat(defaultRate) : undefined),
       discountRate: computedDiscountRate,
       Availability: parsedAvailability,
       FromDate: finalFromDate,
@@ -365,9 +458,7 @@ export const createRoom = async (req, res) => {
     return res.status(201).json({ room: newRoom });
   } catch (error) {
     console.error('Error creating room:', error);
-    return res
-      .status(500)
-      .json({ error: 'Internal Server Error', details: error.message });
+    return res.status(500).json({ error: 'Internal Server Error', details: error.message });
   }
 };
 
@@ -390,8 +481,13 @@ export const updateRoom = async (req, res) => {
     }
 
     const updateData = { ...req.body };
-    if (updateData.defaultRate !== undefined) updateData.defaultRate = parseFloat(updateData.defaultRate);
-    if (updateData.discountRate !== undefined) updateData.discountRate = parseFloat(updateData.discountRate);
+    if (updateData.discountRate !== undefined) {
+      updateData.discountRate = parseFloat(updateData.discountRate);
+      updateData.defaultRate = calculateDefaultRate(updateData.discountRate);
+    } else if (updateData.defaultRate !== undefined) {
+      // Only allow manual override if discountRate is NOT being updated (though frontend disables this)
+      updateData.defaultRate = parseFloat(updateData.defaultRate);
+    }
     if (updateData.Availability !== undefined) updateData.Availability = parseInt(updateData.Availability);
 
     const updatedRoom = await Room.findOneAndUpdate(
@@ -412,30 +508,212 @@ export const updateRoom = async (req, res) => {
       room: updatedRoom,
     });
   } catch (error) {
-    console.error('Error updating room:', {
-      error: error.message,
-      stack: error.stack,
-      id: req.params.id,
-      updateData: req.body,
-      timestamp: new Date().toISOString(),
-    });
+    console.error('Error updating room:', error.message);
 
     if (error.name === 'ValidationError') {
-      return res.status(400).json({
-        error: 'Validation failed',
-        details: error.message,
-      });
+      return res.status(400).json({ error: 'Validation failed', details: error.message });
     }
     if (error.name === 'CastError') {
+      return res.status(400).json({ error: 'Invalid data format', details: error.message });
+    }
+
+    return res.status(500).json({ error: 'Internal Server Error', details: error.message });
+  }
+};
+
+const MAX_NIGHTS = 30;
+
+/**
+ * ⚡ OPTIMIZED getMonthlyRoomRates with parallel chunk fetching
+ */
+export const getMonthlyRoomRates = async (req, res) => {
+  const startTime = Date.now();
+
+  try {
+    const { hotelCode, authCode, month } = req.query;
+
+    if (!hotelCode || !authCode || !month) {
       return res.status(400).json({
-        error: 'Invalid data format',
-        details: error.message,
+        success: false,
+        error: "hotelCode, authCode and month (YYYY-MM) are required"
       });
     }
 
-    return res.status(500).json({
-      error: 'Internal Server Error',
-      details: error.message,
+    const startOfMonth = dayjs(`${month}-01`);
+    if (!startOfMonth.isValid()) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid month format"
+      });
+    }
+
+    const today = dayjs().startOf("day");
+    const endOfMonth = startOfMonth.endOf("month");
+    const daysInMonth = startOfMonth.daysInMonth();
+
+    // Initialize calendar
+    const calendar = {};
+    for (let i = 0; i < daysInMonth; i++) {
+      const d = startOfMonth.add(i, "day").format("YYYY-MM-DD");
+      calendar[d] = { price: null, available: 0, soldOut: true };
+    }
+
+    // If entire month is in past
+    if (endOfMonth.isBefore(today)) {
+      return res.json({ success: true, data: calendar, cached: false });
+    }
+
+    const apiStartDate = startOfMonth.isBefore(today) ? today : startOfMonth;
+    const apiDays = endOfMonth.diff(apiStartDate, "day") + 1;
+
+    // Check cache
+    const cacheKey = `monthly_rates_${hotelCode}_${month}`;
+    const cached = monthlyCache.get(cacheKey);
+    if (cached) {
+      return res.json({ success: true, data: cached, cached: true });
+    }
+
+    // ========== PARALLEL CHUNK FETCHING ==========
+    const chunks = [];
+    let offset = 0;
+
+    while (offset < apiDays) {
+      const chunkStart = apiStartDate.add(offset, "day");
+      const chunkNights = Math.min(MAX_NIGHTS, apiDays - offset);
+      chunks.push({ start: chunkStart, nights: chunkNights });
+      offset += chunkNights;
+    }
+
+    // Fetch all chunks in parallel (max 6 concurrent)
+    const CONCURRENCY = 6;
+    const allApiData = [];
+
+    for (let i = 0; i < chunks.length; i += CONCURRENCY) {
+      const batch = chunks.slice(i, i + CONCURRENCY);
+
+      const promises = batch.map(async ({ start, nights }) => {
+        const url =
+          `https://live.ipms247.com/booking/reservation_api/listing.php` +
+          `?request_type=RoomList` +
+          `&HotelCode=${encodeURIComponent(hotelCode)}` +
+          `&APIKey=${encodeURIComponent(authCode)}` +
+          `&check_in_date=${start.format("YYYY-MM-DD")}` +
+          `&num_nights=${nights}` +
+          `&number_adults=1&number_children=0&num_rooms=1` +
+          `&property_configuration_info=0&showtax=0` +
+          `&show_only_available_rooms=0&language=en`;
+
+        try {
+          const response = await fetchWithRetry(url, 2, 30000);
+          return Array.isArray(response?.data) ? response.data : [];
+        } catch (err) {
+          console.error(`[Monthly API FAIL] ${start.format("YYYY-MM-DD")}:`, err.message);
+          return [];
+        }
+      });
+
+      const results = await Promise.all(promises);
+      results.forEach(data => allApiData.push(...data));
+    }
+
+    // Merge all API data into calendar - Optimized loop
+    const dates = Object.keys(calendar);
+
+    for (const room of allApiData) {
+      if (!room) continue;
+
+      const availObj = room.available_rooms || {};
+      const ratesInfo = room.room_rates_info || {};
+      const priceObj = ratesInfo.exclusive_tax || {};
+
+      // Only iterate dates that exists in both calendar and response
+      for (const date of dates) {
+        const available = availObj[date];
+        if (available === undefined) continue; // Skip if no data for this date
+
+        const numAvailable = Number(available) || 0;
+
+        if (numAvailable > 0) {
+          const calDate = calendar[date];
+          calDate.soldOut = false;
+          // Math.max is slower than simple if in tight loops
+          if (numAvailable > calDate.available) {
+            calDate.available = numAvailable;
+          }
+
+          const price = priceObj[date];
+          if (price !== undefined) {
+            const numPrice = Number(price) || 0;
+            if (numPrice > 0) {
+              if (calDate.price === null || numPrice < calDate.price) {
+                calDate.price = numPrice;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Cache and respond
+    monthlyCache.set(cacheKey, calendar, 1800);
+
+    console.log(`[getMonthlyRoomRates] ${hotelCode} ${month} in ${Date.now() - startTime}ms`);
+
+    return res.json({
+      success: true,
+      data: calendar,
+      cached: false,
+      timing: `${Date.now() - startTime}ms`
     });
+
+  } catch (err) {
+    console.error("[getMonthlyRoomRates ERROR]", err);
+    return res.status(200).json({
+      success: false,
+      data: {},
+      error: "Failed to fetch monthly rates"
+    });
+  }
+};
+
+/**
+ * ⚡ LIGHTWEIGHT VERSION - Returns cached/minimal data quickly
+ */
+export const getSyncedRoomsLight = async (req, res) => {
+  try {
+    const { hotelCode, authCode, fromDate, toDate } = req.query;
+
+    if (!hotelCode || !authCode) {
+      return res.status(400).json({ error: 'hotelCode and authCode are required' });
+    }
+
+    const finalFromDate = fromDate || dayjs().format('YYYY-MM-DD');
+    const finalToDate = toDate || dayjs().add(1, 'day').format('YYYY-MM-DD');
+    const numNights = dayjs(finalToDate).diff(dayjs(finalFromDate), 'day') || 1;
+
+    const cacheKey = `light_rooms_${hotelCode}_${finalFromDate}_${numNights}`;
+    const cached = apiCache.get(cacheKey);
+
+    if (cached) {
+      return res.json({ ...cached, cached: true });
+    }
+
+    // Only fetch from API, minimal DB interaction
+    const roomList = await fetchRoomListCached(hotelCode, authCode, finalFromDate, numNights);
+    const processedData = processGroupedRoomData(roomList || []);
+
+    const result = {
+      message: 'Rooms fetched successfully',
+      count: processedData.length,
+      rooms: processedData,
+    };
+
+    apiCache.set(cacheKey, result, 300);
+
+    return res.json({ ...result, cached: false });
+
+  } catch (error) {
+    console.error('Error in getSyncedRoomsLight:', error.message);
+    return res.status(500).json({ error: 'Internal Server Error', details: error.message });
   }
 };

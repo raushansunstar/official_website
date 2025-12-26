@@ -1,1 +1,0 @@
-const t=n=>{if(n==null||n==="")return"0";const r=typeof n=="string"?parseFloat(n):n;return isNaN(r)?"0":(Math.round(r*100)/100).toLocaleString("en-IN",{maximumFractionDigits:2,minimumFractionDigits:0})},i=n=>`₹${t(n)}`;export{i as f};

@@ -1,1 +1,0 @@
-const t=t=>`₹${(t=>{if(null==t||""===t)return"0";const i="string"==typeof t?parseFloat(t):t;return isNaN(i)?"0":(Math.round(100*i)/100).toLocaleString("en-IN",{maximumFractionDigits:2,minimumFractionDigits:0})})(t)}`;export{t as f};

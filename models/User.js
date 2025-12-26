@@ -6,7 +6,8 @@ const bookingDetailsSchema = new mongoose.Schema({
   language: { type: String },
   ResNo: { type: String },
   SubNo: { type: String },
-  BookingType: { type: String }
+  BookingType: { type: String },
+  BookingSource: { type: String }
 }, { _id: false });
 
 const userSchema = new mongoose.Schema({
@@ -39,6 +40,7 @@ const userSchema = new mongoose.Schema({
   isVerified: { type: Boolean, default: false },
   otp: { type: String },
   otpExpires: { type: Date },
+  commissionRate: { type: Number, default: 0.10 }, // Default 10% commission
   bookingDetails: [bookingDetailsSchema]
 }, { timestamps: true });
 

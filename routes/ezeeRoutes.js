@@ -1,7 +1,7 @@
 // routes/ezeeRoutes.js
 import express from 'express';
 import { addHotel, deleteHotel, editHotel, getAllHotels, getSingleHotel } from '../controllers/adminHotelController.js';
-import { createRoom, deleteRoomById, getRoomById, getRoomList, getSyncedRooms, updateRoom } from '../controllers/roomController.js';
+import { createRoom, deleteRoomById, getRoomById, getRoomList, getSyncedRooms, updateRoom, getMonthlyRoomRates } from '../controllers/roomController.js';
 import { getRoomAndHotelDetails } from '../controllers/getRoomAndHotelDetails.js';
 import { bookDayUseSlot, bulkUpdateDayUseAvailability, cancelDayUseSlot, getDayUseRooms, getMonthlyDayUseData, updateDayUseAvailability } from '../controllers/dayUseRoomController.js';
 import {
@@ -48,6 +48,7 @@ router.delete('/delete/hotel/:hotelCode', deleteHotel);
 
 
 router.get('/syncedRooms', getSyncedRooms);
+router.get('/monthly-rates', getMonthlyRoomRates);
 router.get('/room-list', getRoomList);
 router.post('/rooms', createRoom);
 router.get('/room/:id', getRoomById);
