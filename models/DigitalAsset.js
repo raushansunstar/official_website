@@ -24,6 +24,11 @@ const digitalAssetSchema = new mongoose.Schema({
         enum: ['brochure', 'policy', 'brand_material', 'other'],
         default: 'other'
     },
+    targetUserType: {
+        type: String,
+        enum: ['both', 'agent', 'corporate'],
+        default: 'both'
+    },
     isActive: {
         type: Boolean,
         default: true
