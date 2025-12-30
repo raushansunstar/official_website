@@ -10,8 +10,8 @@ const __dirname = path.dirname(__filename);
 // Configure storage
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
-        // Go up one level from controllers to root, then into build/public/media
-        const uploadPath = path.join(__dirname, '..', 'build', 'public', 'media');
+        // Use the root 'uploads' directory
+        const uploadPath = path.join(__dirname, '..', 'uploads');
 
         // Ensure directory exists
         if (!fs.existsSync(uploadPath)) {

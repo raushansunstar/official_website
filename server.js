@@ -71,7 +71,8 @@ const corsOptions = {
 app.use(cors(corsOptions));
 
 // Middleware
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 app.set('etag', false);
 
@@ -83,16 +84,17 @@ app.use((req, res, next) => {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ✅ Create media directory in build folder at startup
-const BUILD_DIR = path.join(__dirname, 'build');
-const MEDIA_DIR = path.join(BUILD_DIR, 'public', 'media');
+// ✅ Create uploads directory in root at startup
+const UPLOADS_DIR = path.join(__dirname, 'uploads');
 
-// Ensure build and media directories exist
+// Ensure uploads directory exists
 try {
-  fs.mkdirSync(MEDIA_DIR, { recursive: true });
-  console.log('✅ Media directory created at:', MEDIA_DIR);
+  if (!fs.existsSync(UPLOADS_DIR)) {
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+    console.log('✅ Uploads directory created at:', UPLOADS_DIR);
+  }
 } catch (error) {
-  console.error('Error creating media directory:', error);
+  console.error('Error creating uploads directory:', error);
 }
 
 // Connect to the database
@@ -208,7 +210,7 @@ app.use('/api/digital-assets', digitalAssetRoutes);
 app.use('/api/dining', diningRoutes);
 
 
-app.use('/media', express.static(path.join(__dirname, 'build', 'public', 'media')));
+app.use('/media', express.static(path.join(__dirname, 'uploads')));
 
 // ✅ API mount
 // app.use('/api/media', mediaRoutes);
@@ -225,5 +227,5 @@ app.get('*', (req, res) => {
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server is running on ports ${PORT}`);
-  console.log(`Media files served from: ${MEDIA_DIR}`);
+  console.log(`Media files served from: ${UPLOADS_DIR}`);
 });
