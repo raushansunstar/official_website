@@ -85,7 +85,8 @@ const diningSchema = new mongoose.Schema(
             description: String,
             images: [
                 {
-                    image: String
+                    image: String,
+                    name: String
                 }
             ]
         },
