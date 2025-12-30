@@ -47,7 +47,7 @@ import { pushBooking, getBookingList } from './controllers/pushBookingController
 dotenv.config();
 
 const app = express();
-app.use(fileUpload({ limits: { fileSize: 50 * 1024 * 1024 } }));
+app.use(fileUpload({ limits: { fileSize: 100 * 1024 * 1024 } })); // 100MB
 
 
 // Trust proxy for proper HTTPS detection
