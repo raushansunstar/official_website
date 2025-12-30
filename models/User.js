@@ -7,7 +7,8 @@ const bookingDetailsSchema = new mongoose.Schema({
   ResNo: { type: String },
   SubNo: { type: String },
   BookingType: { type: String },
-  BookingSource: { type: String }
+  BookingSource: { type: String },
+  finalPrice: { type: Number, default: 0 } // Store final discounted price
 }, { _id: false });
 
 const userSchema = new mongoose.Schema({
@@ -36,6 +37,7 @@ const userSchema = new mongoose.Schema({
   dateOfBirth: { type: String },
   gender: { type: String, enum: ['Male', 'Female', 'Other', ''] },
   cityOfResidence: { type: String },
+  gstNumber: { type: String },
   loyalAgent: { type: Boolean, default: false },
   isVerified: { type: Boolean, default: false },
   otp: { type: String },

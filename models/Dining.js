@@ -90,6 +90,10 @@ const diningSchema = new mongoose.Schema(
             ]
         },
 
+        menuPdf: {
+            type: String
+        },
+
         isActive: {
             type: Boolean,
             default: true

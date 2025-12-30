@@ -4,7 +4,7 @@ import getUserModel from '../models/User.js';
 
 export const pushBooking = async (req, res) => {
   try {
-    const { HotelCode, APIKey, BookingData, userEmail, BookingSource } = req.body;
+    const { HotelCode, APIKey, BookingData, userEmail, BookingSource, finalPrice } = req.body;
     console.log(BookingData, "booking Data")
 
     if (!HotelCode || !APIKey || !BookingData || !userEmail) {
@@ -56,11 +56,20 @@ export const pushBooking = async (req, res) => {
     console.log("✅ ProcessBooking response:", JSON.stringify(processResponse.data, null, 2));
 
     // Step 3: Save booking data to MongoDB
-    const User = getUserModel;
-    const user = await User.findOne({ email: userEmail });
+    // Try Agent collection first (for corporate/agent users)
+    const { Agent } = await import('./pushBookingController.js').then(() => import('../models/Agent.js'));
+    let user = await Agent.findOne({ email: userEmail });
+    let isAgent = true;
+
+    // If not found in Agent, try User collection
+    if (!user) {
+      const User = getUserModel;
+      user = await User.findOne({ email: userEmail });
+      isAgent = false;
+    }
 
     if (!user) {
-      console.warn("❌ User not found for email:", userEmail);
+      console.warn("❌ User not found in any collection for email:", userEmail);
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
@@ -74,12 +83,22 @@ export const pushBooking = async (req, res) => {
       ResNo: ReservationNo,
       SubNo: subNo,
       BookingType: Inventory_Mode,
-      BookingSource: BookingSource || ""
+      BookingSource: BookingSource || "",
+      finalPrice: finalPrice || 0 // Store the final discounted price
     }));
 
     console.log("🗃️ BookingDetails to insert:", newBookingDetails);
 
     user.bookingDetails.push(...newBookingDetails);
+
+    // Increment earnings for this new booking
+    if (finalPrice && finalPrice > 0) {
+      const commissionRate = user.commissionRate || 0.10;
+      const earningsFromThisBooking = finalPrice * commissionRate;
+      user.totalEarnings = (user.totalEarnings || 0) + earningsFromThisBooking;
+      console.log(`💰 Added earnings to ${isAgent ? 'Agent' : 'User'}: ₹${earningsFromThisBooking}, Total: ₹${user.totalEarnings}`);
+    }
+
     await user.save();
     console.log("✅ BookingDetails saved to DB");
 
@@ -101,6 +120,9 @@ export const pushBooking = async (req, res) => {
 };
 
 
+
+
+
 export const getBookingList = async (req, res) => {
   try {
     const { hotelCode, email, apiKey } = req.query;
@@ -119,17 +141,24 @@ export const getBookingList = async (req, res) => {
     const user = await User.findOne({ email });
     const localBookings = user ? user.bookingDetails : [];
 
-    // Merge BookingSource into bookingList
+    // Merge BookingSource and finalPrice into bookingList
     const mergedBookingList = bookingList.map(booking => {
       // Ensure we compare strings to avoid type mismatches (Number vs String)
       const localBooking = localBookings.find(lb => String(lb.ResNo) === String(booking.ReservationNo));
       return {
         ...booking,
-        Source: localBooking?.BookingSource || booking.Source || ""
+        Source: localBooking?.BookingSource || booking.Source || "",
+        // Override TotalInclusiveTax with finalPrice if available (shows discounted price)
+        TotalInclusiveTax: localBooking?.finalPrice && localBooking.finalPrice > 0
+          ? localBooking.finalPrice
+          : booking.TotalInclusiveTax
       };
     });
 
     // --- Persist Total Earnings Logic ---
+    // DISABLED: Auto-recalculation was overwriting manually deducted earnings
+    // Earnings are now only updated when new bookings are created or via deductEarnings API
+    /*
     if (user) {
       const commissionRate = user.commissionRate || 0.10;
 
@@ -143,6 +172,7 @@ export const getBookingList = async (req, res) => {
       });
 
       const totalEarnings = validBookings.reduce((sum, booking) => {
+        // Use TotalInclusiveTax which now includes finalPrice if available
         const amount = parseFloat(booking.TotalInclusiveTax || 0);
         return sum + (amount * commissionRate);
       }, 0);
@@ -151,6 +181,7 @@ export const getBookingList = async (req, res) => {
       user.totalEarnings = totalEarnings;
       await user.save();
     }
+    */
     // ------------------------------------
 
     res.json({

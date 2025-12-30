@@ -3,6 +3,7 @@
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
 import User from '../models/User.js';
+import { Agent } from '../models/Agent.js';
 import { syncUserToSheet } from '../utils/sheetSync.js';
 
 dotenv.config();
@@ -334,6 +335,57 @@ export const updateUserProfile = async (req, res) => {
     res.json({ success: true, message: 'User updated successfully', user });
 
   } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ✅ Deduct Earnings when user applies earnings discount
+export const deductEarnings = async (req, res) => {
+  try {
+    const { email, amountUsed } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ success: false, message: 'Email is required' });
+    }
+
+    if (typeof amountUsed !== 'number' || amountUsed <= 0) {
+      return res.status(400).json({ success: false, message: 'Invalid amount' });
+    }
+
+    // Try Agent collection FIRST (for corporate/agent users)
+    let user = await Agent.findOne({ email });
+    let isAgent = true;
+
+    // If not found in Agent, try User collection
+    if (!user) {
+      user = await User.findOne({ email });
+      isAgent = false;
+    }
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found in any collection' });
+    }
+
+    // Deduct the amount from totalEarnings
+    const currentEarnings = user.totalEarnings || 0;
+    const newEarnings = Math.max(0, currentEarnings - amountUsed); // Don't go below 0
+
+    user.totalEarnings = newEarnings;
+    await user.save();
+
+    console.log(`✅ Earnings deducted from ${isAgent ? 'Agent' : 'User'}: ${email}, New: ₹${newEarnings}`);
+
+    res.json({
+      success: true,
+      message: 'Earnings deducted successfully',
+      userType: isAgent ? 'Agent' : 'User',
+      previousEarnings: currentEarnings,
+      amountDeducted: amountUsed,
+      remainingEarnings: newEarnings
+    });
+
+  } catch (err) {
+    console.error('Error in deductEarnings:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 };

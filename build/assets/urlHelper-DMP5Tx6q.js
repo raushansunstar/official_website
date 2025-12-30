@@ -1,0 +1,1 @@
+const e=t=>t?t.startsWith("http://")||t.startsWith("https://")||t.startsWith("/")?t:`/${t}`:"",n=t=>t?t.split("-")[0]:null,u=(t,r)=>t?`/hotels/${r?`${t}-${r.toLowerCase().replace(/[^a-z0-9]+/g,"-")}`:`${t}`}`:"/hotels";export{e as a,n as e,u as g};

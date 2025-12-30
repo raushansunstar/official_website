@@ -2,6 +2,7 @@
 import { validationResult } from "express-validator";
 import nodemailer from "nodemailer";
 import { Agent } from "../models/Agent.js";
+import User from "../models/User.js";
 import { syncUserToSheet } from '../utils/sheetSync.js';
 
 export const transporter = nodemailer.createTransport({
@@ -282,6 +283,121 @@ export const deleteAgent = async (req, res) => {
     return res.status(200).json({ ok: true, message: "Agent deleted successfully" });
   } catch (err) {
     console.error("deleteAgent error:", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+};
+
+// ✅ Update commission rate for agent
+export const updateCommission = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { commissionRate } = req.body;
+
+    // Validate commission rate
+    if (typeof commissionRate !== 'number' || commissionRate < 0 || commissionRate > 1) {
+      return res.status(400).json({
+        ok: false,
+        message: "Commission rate must be a number between 0 and 1"
+      });
+    }
+
+    const agent = await Agent.findByIdAndUpdate(
+      id,
+      { $set: { commissionRate } },
+      { new: true, runValidators: true }
+    );
+
+    if (!agent) return res.status(404).json({ ok: false, message: "Agent not found" });
+
+    return res.status(200).json({
+      ok: true,
+      message: "Commission updated successfully",
+      data: agent
+    });
+  } catch (err) {
+    console.error("updateCommission error:", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+};
+
+// Update total earnings for agent (set directly from frontend calculation)
+export const updateEarnings = async (req, res) => {
+  try {
+    const { email } = req.params;
+    const { totalEarnings } = req.body;
+
+    if (typeof totalEarnings !== 'number' || totalEarnings < 0) {
+      return res.status(400).json({ ok: false, message: "Invalid totalEarnings value" });
+    }
+
+    const agent = await Agent.findOne({ email: email.toLowerCase() });
+    if (!agent) {
+      return res.status(404).json({ ok: false, message: "Agent not found" });
+    }
+
+    agent.totalEarnings = totalEarnings;
+    await agent.save();
+
+    return res.status(200).json({
+      ok: true,
+      message: "Earnings updated successfully",
+      totalEarnings: agent.totalEarnings
+    });
+
+  } catch (err) {
+    console.error("updateEarnings error:", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+};
+export const calculateEarnings = async (req, res) => {
+  try {
+    const { email } = req.params;
+
+    // Get agent details
+    const agent = await Agent.findOne({ email: email.toLowerCase() });
+    if (!agent) {
+      return res.status(404).json({ ok: false, message: "Agent not found" });
+    }
+
+    // Find user with this email and get their bookings
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user || !user.bookings || user.bookings.length === 0) {
+      // No bookings, set earnings to 0
+      agent.totalEarnings = 0;
+      await agent.save();
+      return res.status(200).json({
+        ok: true,
+        message: "No bookings found, earnings set to 0",
+        totalEarnings: 0
+      });
+    }
+
+    // Calculate total earnings from confirmed bookings
+    let totalEarnings = 0;
+    const commissionRate = agent.commissionRate || 0.10;
+
+    user.bookings.forEach(booking => {
+      // Only count confirmed bookings
+      if (booking.status === 'confirmed' && booking.totalAmount) {
+        const commission = booking.totalAmount * commissionRate;
+        totalEarnings += commission;
+      }
+    });
+
+    // Update agent's totalEarnings
+    agent.totalEarnings = totalEarnings;
+    await agent.save();
+
+    return res.status(200).json({
+      ok: true,
+      message: "Earnings calculated successfully",
+      totalEarnings,
+      bookingsCount: user.bookings.filter(b => b.status === 'confirmed').length,
+      commissionRate
+    });
+
+  } catch (err) {
+    console.error("calculateEarnings error:", err);
     return res.status(500).json({ ok: false, message: "Server error" });
   }
 };

@@ -3,7 +3,7 @@ import { Router } from "express";
 import { body, param, query } from "express-validator";
 import {
   loginAgent, approveAgent, listAgents, verifyAgentOtp,
-  deleteAgent
+  deleteAgent, updateCommission, updateEarnings
 } from "../controllers/agentController.js";
 import { getAgentByEmail, ROLES_ENUM } from "../models/Agent.js";
 
@@ -31,15 +31,31 @@ router.post(
   verifyAgentOtp
 );
 
-router.get("/by-email", [ query("email").isEmail().withMessage("Valid email required") ], getAgentByEmail);
+router.get("/by-email", [query("email").isEmail().withMessage("Valid email required")], getAgentByEmail);
 router.post("/:id/approve", approveAgent);
 router.get("/", listAgents);
 
 
 router.delete(
   "/:id",
-  [ param("id").isString().withMessage("Valid id required") ],
+  [param("id").isString().withMessage("Valid id required")],
   deleteAgent
+);
+
+// Update commission rate
+router.patch(
+  "/:id/commission",
+  [
+    param("id").isString().withMessage("Valid id required"),
+    body("commissionRate").isFloat({ min: 0, max: 1 }).withMessage("Commission rate must be between 0 and 1")
+  ],
+  updateCommission
+);
+
+// Update earnings for agent/corporate (set from frontend)
+router.post(
+  "/update-earnings/:email",
+  updateEarnings
 );
 
 

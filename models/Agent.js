@@ -18,18 +18,36 @@ export const getAgentByEmail = async (req, res) => {
   }
 };
 
+// Booking details schema (shared with User model)
+const bookingDetailsSchema = new mongoose.Schema({
+  HotelCode: { type: String },
+  APIKey: { type: String },
+  language: { type: String },
+  ResNo: { type: String },
+  SubNo: { type: String },
+  BookingType: { type: String },
+  BookingSource: { type: String },
+  finalPrice: { type: Number, default: 0 }
+}, { _id: false });
+
 const agentSchema = new mongoose.Schema(
   {
-    name:      { type: String, required: true, trim: true },
-    email:     { type: String, required: true, lowercase: true, unique: true, index: true },
-    phone:     { type: String, required: true, unique: true, index: true },
-    role:      { type: String, enum: ROLES, required: true, index: true },
-    approved:  { type: Boolean, default: true },
+    name: { type: String, required: true, trim: true },
+    email: { type: String, required: true, lowercase: true, unique: true, index: true },
+    phone: { type: String, required: true, unique: true, index: true },
+    role: { type: String, enum: ROLES, required: true, index: true },
+    approved: { type: Boolean, default: true },
+    commissionRate: { type: Number, default: 0.10, min: 0, max: 1 },
+    totalEarnings: { type: Number, default: 0, min: 0 },
+    bookingDetails: [bookingDetailsSchema], // Add booking details storage
+    cityOfResidence: { type: String },
+    gstNumber: { type: String },
+    companyName: { type: String }, // For corporate users
 
     // 🔽 NEW: email OTP login
-    isVerified:{ type: Boolean, default: false },
-    otp:       { type: String, default: null },
-    otpExpires:{ type: Date,   default: null }
+    isVerified: { type: Boolean, default: false },
+    otp: { type: String, default: null },
+    otpExpires: { type: Date, default: null }
   },
   { timestamps: true }
 );
