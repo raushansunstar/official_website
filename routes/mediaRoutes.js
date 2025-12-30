@@ -4,8 +4,10 @@ import { Router } from 'express';
 const router = Router();
 
 const __dirname = path.resolve();
-const MEDIA_DIR = path.join(__dirname, 'build', 'public', 'media');
-fs.mkdirSync(MEDIA_DIR, { recursive: true });
+const MEDIA_DIR = path.join(__dirname, 'uploads');
+if (!fs.existsSync(MEDIA_DIR)) {
+  fs.mkdirSync(MEDIA_DIR, { recursive: true });
+}
 
 router.post('/upload', async (req, res) => {
   try {
@@ -24,7 +26,8 @@ router.post('/upload', async (req, res) => {
       'image/svg+xml',
       'application/pdf',
       'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'text/plain'
     ];
     if (!allowedTypes.includes(file.mimetype)) {
       return res.status(400).json({ success: false, msg: 'Only image, PDF, and document files are allowed' });
@@ -40,11 +43,10 @@ router.post('/upload', async (req, res) => {
     await file.mv(dest);
 
     // build public URL
-    const proto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
-    const host = req.get('host');
-    const url = `${proto}://${host}/media/${filename}`;
+    // Use /api/media/ prefix to match server static serve
+    const url = `/api/media/${filename}`;
 
-    res.json({ ok: true, url, path: `/media/${filename}` });
+    res.json({ ok: true, url, path: `/api/media/${filename}` });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, msg: 'Something went wrong', err: err.message });

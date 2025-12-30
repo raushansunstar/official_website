@@ -1,5 +1,5 @@
 import DigitalAsset from '../models/DigitalAsset.js';
-import multer from 'multer';
+
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -7,82 +7,63 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Configure storage
-const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        // Use the root 'uploads' directory
-        const uploadPath = path.join(__dirname, '..', 'uploads');
-
-        // Ensure directory exists
-        if (!fs.existsSync(uploadPath)) {
-            fs.mkdirSync(uploadPath, { recursive: true });
-        }
-
-        cb(null, uploadPath);
-    },
-    filename: function (req, file, cb) {
-        // Create unique filename: timestamp-originalName
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        const ext = path.extname(file.originalname);
-        cb(null, file.fieldname + '-' + uniqueSuffix + ext);
-    }
-});
-
-// Init upload
-export const upload = multer({
-    storage: storage,
-    limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
-    fileFilter: function (req, file, cb) {
-        checkFileType(file, cb);
-    }
-}).single('file'); // Expecting 'file' field name
-
-// Check file type
-function checkFileType(file, cb) {
-    // Allowed extensions
-    const filetypes = /jpeg|jpg|png|gif|pdf|doc|docx|ppt|pptx|xls|xlsx|txt/;
-    // Check ext
-    const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
-    // Check mime
-    // const mimetype = filetypes.test(file.mimetype);
-
-    if (extname) {
-        return cb(null, true);
-    } else {
-        cb('Error: Files only (Images, PDFs, Docs)!');
-    }
-}
-
 // @desc    Upload file for digital asset
 // @route   POST /api/digital-assets/upload
 // @access  Private/Admin
-export const uploadAsset = (req, res) => {
-    upload(req, res, (err) => {
-        if (err) {
-            return res.status(400).json({
-                success: false,
-                message: err
-            });
-        }
-
-        if (!req.file) {
+export const uploadAsset = async (req, res) => {
+    try {
+        if (!req.files || !req.files.file) {
             return res.status(400).json({
                 success: false,
                 message: 'No file selected'
             });
         }
 
-        // Return the path relative to the server's public URL
-        // stored as /media/filename.ext
-        const fileUrl = `/media/${req.file.filename}`;
+        const file = req.files.file;
+
+        // Validate file type
+        const filetypes = /jpeg|jpg|png|gif|pdf|doc|docx|ppt|pptx|xls|xlsx|txt/;
+        const extname = filetypes.test(path.extname(file.name).toLowerCase());
+
+        if (!extname) {
+            return res.status(400).json({
+                success: false,
+                message: 'Error: Files only (Images, PDFs, Docs)!'
+            });
+        }
+
+        // Create unique filename
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        const ext = path.extname(file.name);
+        const filename = 'file-' + uniqueSuffix + ext;
+
+        // Use root uploads directory
+        const uploadPath = path.join(__dirname, '..', 'uploads');
+        if (!fs.existsSync(uploadPath)) {
+            fs.mkdirSync(uploadPath, { recursive: true });
+        }
+
+        // Move file
+        await file.mv(path.join(uploadPath, filename));
+
+        // Return path
+        const fileUrl = `/api/media/${filename}`;
 
         res.status(200).json({
             success: true,
             fileUrl: fileUrl,
-            fileName: req.file.filename,
+            fileName: filename,
             message: 'File uploaded successfully'
         });
-    });
+
+    } catch (err) {
+        console.error('Upload Error:', err);
+        res.status(500).json({
+            success: false,
+            message: 'Server Error during upload',
+            error: err.message
+        });
+    }
 };
 
 // @desc    Get all digital assets

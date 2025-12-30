@@ -4,6 +4,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import cors from 'cors';
+import fileUpload from "express-fileupload";
+
 import axios from 'axios'; // Import axios to make external requests
 import fs from 'fs'; // Add this for directory creation
 import adminRoutes from './routes/adminRoutes.js';
@@ -45,6 +47,8 @@ import { pushBooking, getBookingList } from './controllers/pushBookingController
 dotenv.config();
 
 const app = express();
+app.use(fileUpload({ limits: { fileSize: 50 * 1024 * 1024 } }));
+
 
 // Trust proxy for proper HTTPS detection
 app.set('trust proxy', true);
@@ -209,11 +213,16 @@ app.use('/api/tourandtravel', tourandtravelcontentroutes);
 app.use('/api/digital-assets', digitalAssetRoutes);
 app.use('/api/dining', diningRoutes);
 
+// Media upload API routes
+app.use("/api/media", mediaRoutes);
 
-app.use('/media', express.static(path.join(__dirname, 'uploads')));
+// Serve static uploaded files (PDFs, images, documents) from uploads directory
+app.use("/api/media", express.static(UPLOADS_DIR));
+
+// Legacy media path for build assets
+app.use("/media", express.static(path.join(__dirname, "build", "public", "media")));
 
 // ✅ API mount
-// app.use('/api/media', mediaRoutes);
 
 // Serve static files
 app.use(express.static(path.join(__dirname, 'build')));
