@@ -114,6 +114,12 @@ export const uploadImages = asyncHandler(async (req, res) => {
       return res.status(400).json({ success: false, message: err.message });
     }
 
+    console.log('--- Upload Debug ---');
+    console.log('req.files:', req.files ? Object.keys(req.files) : 'undefined');
+    console.log('req.file:', req.file);
+    console.log('req.body:', req.body);
+    console.log('--------------------');
+
     try {
       // Handle file uploads from either the 'images' or 'image' field
       const files = [];
