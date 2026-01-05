@@ -4,7 +4,7 @@ import getUserModel from '../models/User.js';
 
 export const pushBooking = async (req, res) => {
   try {
-    const { HotelCode, APIKey, BookingData, userEmail, BookingSource, finalPrice } = req.body;
+    const { HotelCode, APIKey, BookingData, userEmail, BookingSource, BookedBy, finalPrice } = req.body;
     console.log(BookingData, "booking Data")
 
     if (!HotelCode || !APIKey || !BookingData || !userEmail) {
@@ -84,6 +84,7 @@ export const pushBooking = async (req, res) => {
       SubNo: subNo,
       BookingType: Inventory_Mode,
       BookingSource: BookingSource || "",
+      BookedBy: BookedBy || "Regular", // New field
       finalPrice: finalPrice || 0 // Store the final discounted price
     }));
 
@@ -137,17 +138,28 @@ export const getBookingList = async (req, res) => {
     const bookingList = response.data.BookingList || [];
 
     // Fetch local user data to get BookingSource
-    const User = getUserModel;
-    const user = await User.findOne({ email });
-    const localBookings = user ? user.bookingDetails : [];
+    // Check Agent collection first
+    const { Agent } = await import('../models/Agent.js');
+    let user = await Agent.findOne({ email });
+    let localBookings = [];
 
-    // Merge BookingSource and finalPrice into bookingList
+    if (user) {
+      localBookings = user.bookingDetails || [];
+    } else {
+      // If not in Agent, check User collection
+      const User = getUserModel;
+      user = await User.findOne({ email });
+      localBookings = user ? user.bookingDetails : [];
+    }
+
+    // Merge BookingSource, BookedBy and finalPrice into bookingList
     const mergedBookingList = bookingList.map(booking => {
       // Ensure we compare strings to avoid type mismatches (Number vs String)
       const localBooking = localBookings.find(lb => String(lb.ResNo) === String(booking.ReservationNo));
       return {
         ...booking,
         Source: localBooking?.BookingSource || booking.Source || "",
+        BookedBy: localBooking?.BookedBy || "Regular", // New field
         // Override TotalInclusiveTax with finalPrice if available (shows discounted price)
         TotalInclusiveTax: localBooking?.finalPrice && localBooking.finalPrice > 0
           ? localBooking.finalPrice

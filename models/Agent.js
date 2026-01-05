@@ -27,6 +27,7 @@ const bookingDetailsSchema = new mongoose.Schema({
   SubNo: { type: String },
   BookingType: { type: String },
   BookingSource: { type: String },
+  BookedBy: { type: String, enum: ['Regular', 'Agent', 'Corporate'], default: 'Regular' }, // New field
   finalPrice: { type: Number, default: 0 }
 }, { _id: false });
 
