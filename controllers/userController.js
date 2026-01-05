@@ -37,7 +37,7 @@ export const getUserByEmail = async (req, res) => {
       dateOfBirth: null,
       gender: null,
       cityOfResidence: null,
-      gstin: null
+      gstNumber: null
     };
 
     if (!email || email.trim() === '') {
@@ -75,7 +75,7 @@ export const getUserByEmail = async (req, res) => {
         dateOfBirth: user.dateOfBirth || '',
         gender: user.gender || '',
         cityOfResidence: user.cityOfResidence || '',
-        gstin: user.gstin || ''
+        gstNumber: user.gstNumber || ''
       }
     });
 
@@ -330,6 +330,15 @@ export const updateUserProfile = async (req, res) => {
 
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // ✅ Sync GST & City to Agent collection if agent exists with same email
+    const agentUpdates = {};
+    if (updateFields.gstNumber !== undefined) agentUpdates.gstNumber = updateFields.gstNumber;
+    if (updateFields.cityOfResidence !== undefined) agentUpdates.cityOfResidence = updateFields.cityOfResidence;
+
+    if (Object.keys(agentUpdates).length > 0) {
+      await Agent.findOneAndUpdate({ email }, { $set: agentUpdates });
     }
 
     res.json({ success: true, message: 'User updated successfully', user });
