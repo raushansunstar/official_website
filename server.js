@@ -4,7 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import cors from 'cors';
-import fileUpload from "express-fileupload";
+// import fileUpload from "express-fileupload";
 
 import axios from 'axios'; // Import axios to make external requests
 import fs from 'fs'; // Add this for directory creation
@@ -47,7 +47,7 @@ import { pushBooking, getBookingList } from './controllers/pushBookingController
 dotenv.config();
 
 const app = express();
-app.use(fileUpload({ limits: { fileSize: 100 * 1024 * 1024 } })); // 100MB
+// app.use(fileUpload({ limits: { fileSize: 100 * 1024 * 1024 } })); // 100MB
 
 
 // Trust proxy for proper HTTPS detection
