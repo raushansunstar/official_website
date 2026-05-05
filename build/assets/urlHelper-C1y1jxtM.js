@@ -1,1 +1,0 @@
-const s=(e,t)=>{if(!e)return"/hotels";const r=t?t.toLowerCase().replace(/[^a-z0-9\s-]/g,"").trim().replace(/\s+/g,"-").replace(/-+/g,"-"):"";return r?`/hotels/${e}-${r}`:`/hotels/${e}`},n=e=>e?e.includes("-")?e.split("-")[0]:e:null;export{n as e,s as g};
