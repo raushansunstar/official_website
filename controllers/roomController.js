@@ -1,6 +1,7 @@
 // controllers/room.controller.js
 import axios from 'axios';
 import Room from '../models/Room.js';
+import Hotel from '../models/Hotel.js';
 import mongoose from 'mongoose';
 import dayjs from 'dayjs';
 import NodeCache from 'node-cache';
@@ -42,6 +43,18 @@ const calculateDefaultRate = (discountRate) => {
   // Random markup between 30% (1.30) and 40% (1.40)
   const markup = 1 + (Math.random() * (0.40 - 0.30) + 0.30);
   return Math.round(discountRate * markup);
+};
+
+const resolveAuthCode = async (hotelCode, authCode) => {
+  if (authCode) return String(authCode).trim();
+  if (!hotelCode) return null;
+  const numericHotelCode = Number(hotelCode);
+  const filter = Number.isFinite(numericHotelCode) && !Number.isNaN(numericHotelCode)
+    ? { hotelCode: numericHotelCode }
+    : { hotelCode };
+  const hotel = await Hotel.findOne(filter, { authKey: 1 }).lean();
+  const resolved = hotel?.authKey ? String(hotel.authKey).trim() : null;
+  return resolved || null;
 };
 
 const processGroupedRoomData = (roomList) => {
@@ -130,9 +143,15 @@ const fetchRoomListCached = async (hotelCode, authCode, fromDate, numNights) => 
 export const getRoomList = async (req, res) => {
   try {
     const { hotelCode, authCode, fromDate, toDate } = req.query;
+    const finalAuthCode = await resolveAuthCode(hotelCode, authCode);
+    if (!hotelCode || !finalAuthCode) {
+      return res
+        .status(400)
+        .json({ error: 'hotelCode and authCode are required as query parameters' });
+    }
     const numNights = toDate ? dayjs(toDate).diff(dayjs(fromDate), 'day') : 1;
 
-    const roomList = await fetchRoomListCached(hotelCode, authCode, fromDate, numNights);
+    const roomList = await fetchRoomListCached(hotelCode, finalAuthCode, fromDate, numNights);
     const processedData = processGroupedRoomData(roomList);
 
     res.status(200).json({
@@ -156,8 +175,8 @@ export const getSyncedRooms = async (req, res) => {
 
   try {
     const { hotelCode, authCode, fromDate, toDate, skipCache } = req.query;
-
-    if (!hotelCode || !authCode) {
+    const finalAuthCode = await resolveAuthCode(hotelCode, authCode);
+    if (!hotelCode || !finalAuthCode) {
       return res
         .status(400)
         .json({ error: 'hotelCode and authCode are required as query parameters' });
@@ -177,7 +196,7 @@ export const getSyncedRooms = async (req, res) => {
 
     if (!roomList) {
       console.log(`[getSyncedRooms] Fetching from API...`);
-      roomList = await fetchRoomListCached(hotelCode, authCode, finalFromDate, numNights);
+      roomList = await fetchRoomListCached(hotelCode, finalAuthCode, finalFromDate, numNights);
       apiCache.set(apiCacheKey, roomList, 300);
     } else {
       console.log(`[getSyncedRooms] Using cached API response`);
@@ -531,8 +550,8 @@ export const getMonthlyRoomRates = async (req, res) => {
 
   try {
     const { hotelCode, authCode, month } = req.query;
-
-    if (!hotelCode || !authCode || !month) {
+    const finalAuthCode = await resolveAuthCode(hotelCode, authCode);
+    if (!hotelCode || !finalAuthCode || !month) {
       return res.status(400).json({
         success: false,
         error: "hotelCode, authCode and month (YYYY-MM) are required"
@@ -596,7 +615,7 @@ export const getMonthlyRoomRates = async (req, res) => {
           `https://live.ipms247.com/booking/reservation_api/listing.php` +
           `?request_type=RoomList` +
           `&HotelCode=${encodeURIComponent(hotelCode)}` +
-          `&APIKey=${encodeURIComponent(authCode)}` +
+          `&APIKey=${encodeURIComponent(finalAuthCode)}` +
           `&check_in_date=${start.format("YYYY-MM-DD")}` +
           `&num_nights=${nights}` +
           `&number_adults=1&number_children=0&num_rooms=1` +
@@ -682,8 +701,8 @@ export const getMonthlyRoomRates = async (req, res) => {
 export const getSyncedRoomsLight = async (req, res) => {
   try {
     const { hotelCode, authCode, fromDate, toDate } = req.query;
-
-    if (!hotelCode || !authCode) {
+    const finalAuthCode = await resolveAuthCode(hotelCode, authCode);
+    if (!hotelCode || !finalAuthCode) {
       return res.status(400).json({ error: 'hotelCode and authCode are required' });
     }
 
@@ -699,7 +718,7 @@ export const getSyncedRoomsLight = async (req, res) => {
     }
 
     // Only fetch from API, minimal DB interaction
-    const roomList = await fetchRoomListCached(hotelCode, authCode, finalFromDate, numNights);
+    const roomList = await fetchRoomListCached(hotelCode, finalAuthCode, finalFromDate, numNights);
     const processedData = processGroupedRoomData(roomList || []);
 
     const result = {

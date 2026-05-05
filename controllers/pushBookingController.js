@@ -1,14 +1,26 @@
 import axios from 'axios';
 import qs from 'qs';
 import getUserModel from '../models/User.js';
+import Hotel from '../models/Hotel.js';
+import { Agent } from '../models/Agent.js';
 
 export const pushBooking = async (req, res) => {
   try {
     const { HotelCode, APIKey, BookingData, userEmail, BookingSource, BookedBy, finalPrice } = req.body;
     console.log(BookingData, "booking Data")
 
-    if (!HotelCode || !APIKey || !BookingData || !userEmail) {
-      console.warn("❌ Missing fields:", { HotelCode, APIKey, BookingData, userEmail });
+    let resolvedAPIKey = APIKey;
+    if (!resolvedAPIKey && HotelCode) {
+      const numericHotelCode = Number(HotelCode);
+      const filter = Number.isFinite(numericHotelCode) && !Number.isNaN(numericHotelCode)
+        ? { hotelCode: numericHotelCode }
+        : { hotelCode: HotelCode };
+      const hotel = await Hotel.findOne(filter, { authKey: 1 }).lean();
+      resolvedAPIKey = hotel?.authKey || null;
+    }
+
+    if (!HotelCode || !resolvedAPIKey || !BookingData || !userEmail) {
+      console.warn("❌ Missing fields:", { HotelCode, APIKey: resolvedAPIKey, BookingData, userEmail });
       return res.status(400).json({ success: false, message: "Missing required fields" });
     }
 
@@ -16,7 +28,7 @@ export const pushBooking = async (req, res) => {
     const requestBody = qs.stringify({
       request_type: "InsertBooking",
       HotelCode: HotelCode,
-      APIKey: APIKey,
+      APIKey: resolvedAPIKey,
       BookingData: JSON.stringify(BookingData)
     });
     console.log("📦 Request Body for InsertBooking:", requestBody);
@@ -48,7 +60,7 @@ export const pushBooking = async (req, res) => {
       Error_Text: ""
     };
 
-    const processBookingURL = `https://live.ipms247.com/booking/reservation_api/listing.php?request_type=ProcessBooking&HotelCode=${HotelCode}&APIKey=${APIKey}&Process_Data=${encodeURIComponent(JSON.stringify(processData))}`;
+    const processBookingURL = `https://live.ipms247.com/booking/reservation_api/listing.php?request_type=ProcessBooking&HotelCode=${HotelCode}&APIKey=${resolvedAPIKey}&Process_Data=${encodeURIComponent(JSON.stringify(processData))}`;
 
     console.log("📤 ProcessBooking API URL:", processBookingURL);
 
@@ -57,7 +69,6 @@ export const pushBooking = async (req, res) => {
 
     // Step 3: Save booking data to MongoDB
     // Try Agent collection first (for corporate/agent users)
-    const { Agent } = await import('./pushBookingController.js').then(() => import('../models/Agent.js'));
     let user = await Agent.findOne({ email: userEmail });
     let isAgent = true;
 
@@ -78,7 +89,7 @@ export const pushBooking = async (req, res) => {
 
     const newBookingDetails = subReservations.map(subNo => ({
       HotelCode,
-      APIKey,
+      APIKey: resolvedAPIKey,
       language: lang_key,
       ResNo: ReservationNo,
       SubNo: subNo,
@@ -127,19 +138,28 @@ export const pushBooking = async (req, res) => {
 export const getBookingList = async (req, res) => {
   try {
     const { hotelCode, email, apiKey } = req.query;
+    let resolvedApiKey = apiKey;
 
-    if (!hotelCode || !email || !apiKey) {
+    if (!resolvedApiKey && hotelCode) {
+      const numericHotelCode = Number(hotelCode);
+      const filter = Number.isFinite(numericHotelCode) && !Number.isNaN(numericHotelCode)
+        ? { hotelCode: numericHotelCode }
+        : { hotelCode };
+      const hotel = await Hotel.findOne(filter, { authKey: 1 }).lean();
+      resolvedApiKey = hotel?.authKey || null;
+    }
+
+    if (!hotelCode || !email || !resolvedApiKey) {
       return res.status(400).json({ error: 'hotelCode, email, and apiKey are required' });
     }
 
-    const url = `https://live.ipms247.com/booking/reservation_api/listing.php?request_type=BookingList&HotelCode=${hotelCode}&APIKey=${apiKey}&arrival_from=&arrival_to=&EmailId=${email}`;
+    const url = `https://live.ipms247.com/booking/reservation_api/listing.php?request_type=BookingList&HotelCode=${hotelCode}&APIKey=${resolvedApiKey}&arrival_from=&arrival_to=&EmailId=${email}`;
 
     const response = await axios.get(url);
     const bookingList = response.data.BookingList || [];
 
     // Fetch local user data to get BookingSource
     // Check Agent collection first
-    const { Agent } = await import('../models/Agent.js');
     let user = await Agent.findOne({ email });
     let localBookings = [];
 
@@ -166,6 +186,45 @@ export const getBookingList = async (req, res) => {
           : booking.TotalInclusiveTax
       };
     });
+
+    // Include local-only bookings (e.g. Day Use) that PMS does not return.
+    const externalResNos = new Set(
+      bookingList
+        .map((b) => String(b.ReservationNo || '').trim())
+        .filter(Boolean)
+    );
+    const requestedHotelCode = String(hotelCode || '').trim();
+    const localOnlyBookings = localBookings
+      .filter((lb) => {
+        const resNo = String(lb?.ResNo || '').trim();
+        const localHotelCode = String(lb?.HotelCode || '').trim();
+        return (
+          Boolean(resNo) &&
+          !externalResNos.has(resNo) &&
+          localHotelCode === requestedHotelCode
+        );
+      })
+      .map((lb) => ({
+        ReservationNo: lb.ResNo || '',
+        GuestName: lb.GuestName || email,
+        ArrivalDate: lb.ArrivalDate || lb.ReservationDate || '',
+        DepartureDate: lb.DepartureDate || lb.ArrivalDate || '',
+        ReservationDate: lb.ReservationDate || lb.ArrivalDate || '',
+        Room: lb.Room || 'Day Use Room',
+        RoomNo: lb.RoomNo || '',
+        Adult: Number(lb.Adult || 1),
+        Child: Number(lb.Child || 0),
+        Email: lb.Email || email,
+        Mobile: lb.Mobile || '',
+        TransactionStatus: lb.TransactionStatus || 'Pay at Hotel',
+        BookingStatus: lb.BookingStatus || 'Confirmed Reservation',
+        Status: lb.Status || 'Confirmed',
+        DueAmount: Number(lb.DueAmount || 0),
+        FolioNo: lb.FolioNo || '',
+        Source: lb.Source || lb.BookingSource || '',
+        NoOfNights: Number(lb.NoOfNights || 0),
+        TotalInclusiveTax: Number(lb.finalPrice || 0),
+      }));
 
     // --- Persist Total Earnings Logic ---
     // DISABLED: Auto-recalculation was overwriting manually deducted earnings
@@ -198,7 +257,7 @@ export const getBookingList = async (req, res) => {
 
     res.json({
       ...response.data,
-      BookingList: mergedBookingList,
+      BookingList: [...mergedBookingList, ...localOnlyBookings],
       totalEarnings: user ? user.totalEarnings : 0
     });
 
@@ -213,8 +272,50 @@ export const getBookingList = async (req, res) => {
 export const cancelBookingController = async (req, res) => {
   try {
     const { hotelCode, apiKey, reservationNo } = req.body;
+    const reservationStr = String(reservationNo || '').trim();
 
-    if (!hotelCode || !apiKey || !reservationNo) {
+    // Local-only day-use bookings are stored in DB and not present in external PMS.
+    if (reservationStr.startsWith('DU-')) {
+      const updateCancelled = async (Model) => {
+        const doc = await Model.findOne({
+          bookingDetails: { $elemMatch: { ResNo: reservationStr } }
+        });
+        if (!doc) return false;
+        const idx = (doc.bookingDetails || []).findIndex((b) => String(b?.ResNo) === reservationStr);
+        if (idx === -1) return false;
+        doc.bookingDetails[idx].Status = 'Cancelled';
+        doc.bookingDetails[idx].BookingStatus = 'Cancelled';
+        await doc.save();
+        return true;
+      };
+
+      const cancelledInAgent = await updateCancelled(Agent);
+      const cancelledInUser = cancelledInAgent ? false : await updateCancelled(getUserModel);
+
+      if (!cancelledInAgent && !cancelledInUser) {
+        return res.status(404).json({
+          success: false,
+          message: 'Day-use booking not found'
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Day-use booking cancelled successfully'
+      });
+    }
+    let resolvedApiKey = apiKey;
+
+    if (!resolvedApiKey && hotelCode) {
+      const numericHotelCode = Number(hotelCode);
+      const filter = Number.isFinite(numericHotelCode) && !Number.isNaN(numericHotelCode)
+        ? { hotelCode: numericHotelCode }
+        : { hotelCode };
+      const hotel = await Hotel.findOne(filter, { authKey: 1 }).lean();
+      resolvedApiKey = hotel?.authKey || null;
+    }
+
+    if (!hotelCode || !resolvedApiKey || !reservationNo) {
       return res.status(400).json({
         success: false,
         message: "hotelCode, apiKey, and reservationNo are required"
@@ -226,7 +327,7 @@ export const cancelBookingController = async (req, res) => {
     const params = {
       request_type: "CancelBooking",
       HotelCode: hotelCode,
-      APIKey: apiKey,
+      APIKey: resolvedApiKey,
       ResNo: reservationNo,
       SubNo: "",
       language: "en"

@@ -28,7 +28,24 @@ const bookingDetailsSchema = new mongoose.Schema({
   BookingType: { type: String },
   BookingSource: { type: String },
   BookedBy: { type: String, enum: ['Regular', 'Agent', 'Corporate'], default: 'Regular' }, // New field
-  finalPrice: { type: Number, default: 0 }
+  finalPrice: { type: Number, default: 0 },
+  ArrivalDate: { type: String },
+  DepartureDate: { type: String },
+  ReservationDate: { type: String },
+  GuestName: { type: String },
+  Email: { type: String },
+  Mobile: { type: String },
+  NoOfNights: { type: Number, default: 0 },
+  Status: { type: String },
+  BookingStatus: { type: String },
+  TransactionStatus: { type: String },
+  Room: { type: String },
+  RoomNo: { type: String },
+  Adult: { type: Number, default: 1 },
+  Child: { type: Number, default: 0 },
+  FolioNo: { type: String },
+  Source: { type: String },
+  DueAmount: { type: Number, default: 0 }
 }, { _id: false });
 
 const agentSchema = new mongoose.Schema(

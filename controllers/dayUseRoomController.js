@@ -3,6 +3,8 @@
 import Hotel from '../models/Hotel.js';
 import Room from '../models/Room.js';
 import DayUseRoom from '../models/DayUseRoom.js';
+import User from '../models/User.js';
+import { Agent } from '../models/Agent.js';
 
 
 const roomTypeMap = {
@@ -393,9 +395,70 @@ export const bulkUpdateDayUseAvailability = async (req, res) => {
 
 const DEFAULT_TIMESLOT = 'Full Day';
 
+const persistDayUseBooking = async ({
+  userEmail,
+  guestName,
+  mobile,
+  hotelCode,
+  roomName,
+  date,
+  finalPrice,
+  bookingSource = 'DayUse'
+}) => {
+  if (!userEmail) return null;
+
+  const reservationNo = `DU-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const amount = Number(finalPrice) > 0 ? Number(finalPrice) : 0;
+  const bookingRecord = {
+    HotelCode: String(hotelCode),
+    BookingType: 'DayUse',
+    BookingSource: bookingSource,
+    Source: bookingSource,
+    BookedBy: 'Regular',
+    finalPrice: amount,
+    ResNo: reservationNo,
+    SubNo: '1',
+    ArrivalDate: date,
+    DepartureDate: date,
+    ReservationDate: new Date().toISOString().slice(0, 10),
+    GuestName: guestName || userEmail,
+    Email: userEmail,
+    Mobile: mobile || '',
+    NoOfNights: 0,
+    Status: 'Confirmed',
+    BookingStatus: 'Confirmed Reservation',
+    TransactionStatus: 'Pay at Hotel',
+    Room: roomName || 'Day Use Room',
+    RoomNo: 'Day Use',
+    Adult: 1,
+    Child: 0,
+    FolioNo: '',
+    DueAmount: 0,
+  };
+
+  let account = await Agent.findOne({ email: userEmail });
+  if (!account) account = await User.findOne({ email: userEmail });
+  if (!account) return null;
+
+  account.bookingDetails.push(bookingRecord);
+  await account.save();
+  return bookingRecord;
+};
+
 export const bookDayUseSlot = async (req, res) => {
   try {
-    const { hotelCode, roomName, date, qty = 1, timeSlot = DEFAULT_TIMESLOT } = req.body;
+    const {
+      hotelCode,
+      roomName,
+      date,
+      qty = 1,
+      timeSlot = DEFAULT_TIMESLOT,
+      userEmail,
+      guestName,
+      mobile,
+      finalPrice,
+      bookingSource
+    } = req.body;
 
     if (!hotelCode || !roomName || !date || qty <= 0) {
       return res.status(400).json({ error: 'hotelCode, roomName, date, and positive qty are required' });
@@ -438,10 +501,22 @@ export const bookDayUseSlot = async (req, res) => {
     }
 
     const slot = updated.slots.find(s => s.timeSlot === timeSlot);
+    const bookingRecord = await persistDayUseBooking({
+      userEmail,
+      guestName,
+      mobile,
+      hotelCode,
+      roomName,
+      date: cleanDate,
+      finalPrice,
+      bookingSource
+    });
+
     return res.status(200).json({
       message: 'Booked successfully: availability decremented',
       remainingAvailability: slot?.availability ?? 0,
-      dayUse: updated
+      dayUse: updated,
+      booking: bookingRecord
     });
 
   } catch (err) {
